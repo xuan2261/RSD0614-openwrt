@@ -1,0 +1,118 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/dts-v1/;
+
+/*
+ * Rock Space RSD0614 V1.0 — first initramfs bring-up.
+ *
+ * Target evidence:
+ *   - RTL8197F family / MIPS
+ *   - 64 MiB DDR2
+ *   - BH25Q64, 8 MiB SPI NOR, 64 KiB erase blocks
+ *   - stock serial: ttyS0, 115200 8N1
+ *   - stock firmware region: 0x00030000..0x007cffff
+ *   - protected CFG/calibration: 0x00020000..0x0002ffff
+ *   - external PCIe radio: 10ec:b814 / RTL8814B
+ *
+ * First-boot safety policy:
+ *   - every MTD partition is read-only;
+ *   - Ethernet is disabled;
+ *   - PCIe is disabled;
+ *   - integrated WMAC is disabled;
+ *   - no external-switch GPIO / CPU-port / RGMII values are guessed.
+ *
+ * This file is for RAM-boot development only.
+ */
+
+#include "RTL8197F.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+/ {
+	compatible = "rockspace,rsd0614", "realtek,rtl8197f-soc";
+	model = "Rock Space RSD0614 V1.0";
+
+	memory {
+		device_type = "memory";
+		reg = <0x00000000 0x04000000>; /* 64 MiB, target-verified */
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200 initcall_debug ignore_loglevel";
+	};
+};
+
+&serial0 {
+	status = "okay";
+};
+
+&spi0 {
+	/* Diagnostic RAM-boot: keep stock NOR completely unprobed. */
+	status = "disabled";
+
+	m25p80@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		/* Conservative first-boot clock; stock flash is BH25Q64. */
+		spi-max-frequency = <25000000>;
+
+		partition@0 {
+			label = "bootloader";
+			reg = <0x000000 0x020000>;
+			read-only;
+		};
+
+		partition@20000 {
+			label = "cfg";
+			reg = <0x020000 0x010000>;
+			read-only; /* per-unit RF/MAC/manufacturing data */
+		};
+
+		partition@30000 {
+			label = "firmware";
+			reg = <0x030000 0x7a0000>;
+			read-only;
+		};
+
+		partition@7d0000 {
+			label = "cpe";
+			reg = <0x7d0000 0x010000>;
+			read-only;
+		};
+
+		partition@7e0000 {
+			label = "cfm";
+			reg = <0x7e0000 0x010000>;
+			read-only;
+		};
+
+		partition@7f0000 {
+			label = "cfm_backup";
+			reg = <0x7f0000 0x010000>;
+			read-only;
+		};
+	};
+};
+
+/*
+ * Deliberately disabled for the first serial-only boot.
+ * The donor RTL8197F.dtsi enables pcie0 by default, so this override is
+ * load-bearing: it prevents probing an unvalidated PCIe/RF path.
+ */
+&pcie0 {
+	status = "disabled";
+};
+
+&pcie1 {
+	status = "disabled";
+};
+
+&wmac {
+	status = "disabled";
+};
+
+&ethernet {
+	status = "disabled";
+};

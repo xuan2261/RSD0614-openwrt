@@ -1,0 +1,22 @@
+# Portable synthetic LZMA fixture
+
+`linux-known-size-no-eopm.lzma` is **test data, not router firmware**.
+
+- Compressed length: 344 bytes.
+- SHA-256: `bdfebb29df5e0f4d53972da8ae307e773345d1731b635ef7b55113a6a9792e07`.
+- Uncompressed length: 76,822 bytes.
+- Payload: `b"Linux version fixture\0" + bytes(range(256)) * 300`.
+- Uncompressed SHA-256: `b34a977c818aa2351e56c17981b69687d38399b57bd4bef580c5469fa038cac1`.
+- Header: properties 93, dictionary 8 MiB, explicit uncompressed length.
+- No end-of-payload marker. The size is authoritative for stream termination.
+- Generated with liblzma 5.8.1, LZMA1EXT, ext_flags=0, preset6.
+- Decoded byte-for-byte successfully with actual liblzma5.2.2 and5.8.1.
+
+The development-only generator is `tools/make_lzma_fixture.c`. It verifies the
+compressed raw stream with LZMA1EXT's strict no-EOPM decoder before saving it.
+The **generator is not run by the Bullseye builder or test suite**; old readers
+only need to read the stored standard LZMA-alone fixture.
+
+Different encoder versions may produce different valid compressed bytes. A fixture
+update must intentionally update the hash and re-run the real compatibility matrix.
+Never silently regenerate it during tests.

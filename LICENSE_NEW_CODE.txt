@@ -1,0 +1,3 @@
+New Python/PowerShell glue and tests in this patch pack are provided under MIT.
+The Linux patch context remains subject to upstream Linux GPL-2.0 licensing.
+Referenced upstream code and user binaries are not relicensed.

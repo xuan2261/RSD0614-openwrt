@@ -1,0 +1,19 @@
+From: RSD0614 development audit
+Subject: [LOCAL] spi-nor: describe target-confirmed BH25Q64 for conservative reads
+
+The stock boot log records JEDEC 68 40 17, 8 MiB, and 64 KiB erase geometry.
+Use single-lane normal reads, no guessed SFDP/quad/4-KiB capabilities.
+This descriptor is not a persistent-write qualification. Every RSD0614
+partition remains read-only. Hardware probe is NOT YET VERIFIED.
+
+--- a/drivers/mtd/spi-nor/spi-nor.c
++++ b/drivers/mtd/spi-nor/spi-nor.c
+@@ -934,3 +934,8 @@
+ static const struct flash_info spi_nor_ids[] = {
++	/* RSD0614: target-confirmed ID and geometry; conservative read profile. */
++	{ "bh25q64", INFO(0x684017, 0, 64 * 1024, 128,
++		SPI_NOR_NO_FR | SPI_NOR_SKIP_SFDP) },
++	/* Write/erase qualification is deliberately outside this local port. */
++
+ 	/* Atmel -- some are (confusingly) marketed as "DataFlash" */
+ 	{ "at25fs010",  INFO(0x1f6601, 0, 32 * 1024,   4, SECT_4K) },

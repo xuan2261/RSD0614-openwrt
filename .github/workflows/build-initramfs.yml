@@ -1,0 +1,100 @@
+name: build-initramfs
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobs:
+        description: Parallel build jobs
+        required: true
+        default: '2'
+        type: choice
+        options: ['1', '2', '3', '4']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rsd0614-initramfs-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BUILDER_IMAGE: rsd0614-openwrt-builder:ci
+      WORK_VOLUME: rsd0614-openwrt-${{ github.run_id }}-${{ github.run_attempt }}
+      OUT_DIR: ${{ github.workspace }}/ci-out
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Disk status before build
+        run: df -h
+
+      - name: Build pinned builder image
+        run: |
+          docker build \
+            --platform=linux/amd64 \
+            --progress=plain \
+            --pull \
+            --build-arg DEBIAN_SNAPSHOT=20260901T000000Z \
+            -t "$BUILDER_IMAGE" .
+
+      - name: Builder smoke test
+        run: |
+          docker run --rm --platform=linux/amd64 --network=none "$BUILDER_IMAGE" \
+            sh -c 'set -eu; test "$(id -u)" = 1000; python2 --version; python3 --version; git --version; command -v gcc; command -v make; command -v flock; cat /opt/rsd0614/debian-snapshot.txt'
+
+      - name: Preflight inside builder
+        run: |
+          docker run --rm --platform=linux/amd64 --network=none --user 1000:1000 \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/port,readonly" \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --workdir /tmp \
+            "$BUILDER_IMAGE" python3 /port/run_tests.py
+
+      - name: Prepare isolated build volume and output
+        run: |
+          docker volume create --label rsd0614.work=github-actions "$WORK_VOLUME"
+          docker run --rm --platform=linux/amd64 --network=none --user 0:0 \
+            --mount "type=volume,source=$WORK_VOLUME,target=/work" \
+            "$BUILDER_IMAGE" sh -c 'set -eu; chown 1000:1000 /work; chmod u+rwx /work'
+          mkdir -p "$OUT_DIR"
+          chmod 0777 "$OUT_DIR"
+
+      - name: Build RSD0614 initramfs
+        run: |
+          docker run --rm --platform=linux/amd64 --user 1000:1000 \
+            --mount "type=volume,source=$WORK_VOLUME,target=/work" \
+            --mount "type=bind,source=$GITHUB_WORKSPACE,target=/port,readonly" \
+            --mount "type=bind,source=$OUT_DIR,target=/out" \
+            --env "JOBS=${{ inputs.jobs }}" \
+            --workdir /work \
+            "$BUILDER_IMAGE" bash /port/build-rsd0614-initramfs.sh
+
+      - name: Summarize result
+        if: always()
+        run: |
+          echo '### RSD0614 build' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$OUT_DIR/BUILD_RESULT.txt" ]; then
+            cat "$OUT_DIR/BUILD_RESULT.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$OUT_DIR/STATUS.txt" ]; then
+            echo '' >> "$GITHUB_STEP_SUMMARY"
+            cat "$OUT_DIR/STATUS.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          df -h >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rsd0614-initramfs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-out/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Cleanup build volume
+        if: always()
+        run: docker volume rm -f "$WORK_VOLUME" || true

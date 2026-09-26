@@ -1,0 +1,27 @@
+# Build outputs / local workspaces
+out/
+logs/
+_build/
+ci-out/
+__pycache__/
+*.py[cod]
+
+# Firmware / device dumps: never commit device-unique or stock images
+*.bin
+*.img
+*.trx
+*.fw
+*.har
+*.pcap
+*.pcapng
+RSD0614_fullflash_*.bin
+RouterCfm.cfg
+syslog.tar
+
+# Local editor / OS state
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.tmp
+*.log

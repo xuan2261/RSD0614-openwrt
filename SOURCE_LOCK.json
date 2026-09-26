@@ -1,0 +1,15 @@
+{
+  "donor_repo": "ADCDS/openwrt-dlink-dir842-r1",
+  "donor_commit": "229536d89c25a676417717304fcef386a53a7875",
+  "base_repo": "ggbruno/openwrt",
+  "base_commit": "8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67",
+  "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
+  "mode": "initramfs-only",
+  "persistent_flash": "NO-GO",
+  "bundle_version": "5.2",
+  "debian_snapshot": "20260901T000000Z",
+  "builder_base": "debian:bullseye",
+  "builder_base_digest_pinned": false,
+  "ram_boot_authorized": false,
+  "intent": "serial/SPI-only candidate; no donor target userspace"
+}

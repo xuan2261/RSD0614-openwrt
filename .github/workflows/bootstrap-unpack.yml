@@ -1,0 +1,36 @@
+name: bootstrap-repository
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.bootstrap/RSD0614-repo-bootstrap.zip'
+      - '.github/workflows/bootstrap-unpack.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Expand reviewed repository bundle
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/rsd0614-repo
+          mkdir -p /tmp/rsd0614-repo
+          unzip -q .bootstrap/RSD0614-repo-bootstrap.zip -d /tmp/rsd0614-repo
+          cp -a /tmp/rsd0614-repo/. .
+          rm -f .bootstrap/RSD0614-repo-bootstrap.zip
+          rm -f .github/workflows/bootstrap-unpack.yml
+          rmdir .bootstrap 2>/dev/null || true
+      - name: Commit repository source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: add RSD0614 port source and CI'
+          git push origin HEAD:main

@@ -9,6 +9,10 @@ on:
         default: '2'
         type: choice
         options: ['1', '2', '3', '4']
+  push:
+    branches: [main]
+    paths:
+      - '.github/build-trigger'
 
 permissions:
   contents: read
@@ -69,7 +73,7 @@ jobs:
             --mount "type=volume,source=$WORK_VOLUME,target=/work" \
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/port,readonly" \
             --mount "type=bind,source=$OUT_DIR,target=/out" \
-            --env "JOBS=${{ inputs.jobs }}" \
+            --env "JOBS=${{ inputs.jobs || '2' }}" \
             --workdir /work \
             "$BUILDER_IMAGE" bash /port/build-rsd0614-initramfs.sh
 

@@ -6,7 +6,7 @@ BASE='8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67'; PATCH_NAME='9999-rsd0614-bh25q6
 BOOT_MOUNT_ROOT_LINE="\t[ -f /proc/mounts ] || /sbin/mount_root\n"
 BOOT_SAFE_LINE="\t# RSD0614 RAM-only diagnostic: persistent-root fallback disabled.\n"
 DEFAULT_NETWORK_UNSAFE="ucidef_set_interface_lan 'eth0'\n[ -d /sys/class/net/eth1 ] && ucidef_set_interface_wan 'eth1'\n"
-DEFAULT_NETWORK_SAFE="# RSD0614 RAM-only diagnostic: do not synthesize eth0/eth1.\n"
+DEFAULT_NETWORK_SAFE="# RSD0614 RAM-only diagnostic: do not synthesize physical interfaces.\n"
 IRQ_UNSAFE_BLOCK="\tic_w32(BIT(15)|BIT(21)|BIT(29), REALTEK_IC_REG_MASK);\n\tic_w32(BIT(15), REALTEK_IC_REG2_MASK);\n\n\t// Return only MARK1\n\treturn BIT(15)|BIT(21)|BIT(29);"
 IRQ_SAFE_BLOCK="\t/*\n\t * RSD0614 serial-only diagnostic: the bootloader has just used\n\t * Ethernet for TFTP, while NET/PCIe/WMAC drivers are deliberately\n\t * disabled. Clear and keep their direct interrupt sources masked so\n\t * stale bootloader state cannot create an unowned interrupt storm.\n\t */\n\tic_w32(BIT(15)|BIT(21)|BIT(29), REALTEK_IC_REG_STATUS);\n\tic_w32(0, REALTEK_IC_REG_MASK);\n\tic_w32(BIT(15), REALTEK_IC_REG2_MASK);\n\n\treturn 0;"
 DISABLE_KERNEL=('CONFIG_NET_RTL819X','CONFIG_RTL8197F_WMAC','CONFIG_RTL8192CD','CONFIG_RTL8366_SMI','CONFIG_RTL8367B_PHY','CONFIG_MTD_SPLIT_FIRMWARE','CONFIG_MTD_SPLIT_CVIMG_FW')

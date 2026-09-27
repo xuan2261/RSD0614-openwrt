@@ -1,1 +1,3 @@
-RSD0614 v5.3 diagnostic GitHub-hosted build request
+RSD0614 v5.3.1 post-remediation GitHub-hosted build request
+purpose=produce audited initramfs candidate with provenance
+persistent_flash=NO-GO

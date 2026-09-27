@@ -6,10 +6,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.3.2",
+  "bundle_version": "5.3.3",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only pre-RAM diagnostic; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; mount_root suppressed; no donor target userspace"
+  "intent": "serial-only pre-RAM diagnostic; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

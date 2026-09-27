@@ -2,7 +2,7 @@
 """Export final kernel evidence and check generated config. No router access."""
 from pathlib import Path
 import argparse,hashlib,json,re,shutil
-from harden_source import DISABLE_KERNEL
+from harden_source import DISABLE_KERNEL,IRQ_SAFE_BLOCK
 
 def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAILABLE',builder_image_id='NOT_RECORDED'):
     tree=Path(tree);out=Path(out);dest=out/'kernel-evidence';dest.mkdir(parents=True,exist_ok=True)
@@ -17,11 +17,13 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     src=linux/'drivers/mtd/spi-nor/spi-nor.c'
     source=src.read_text()
     if not re.search(r'"bh25q64"\s*,\s*INFO\(0x684017',source):raise ValueError('BH25Q64 patch missing from compiled source')
+    irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
+    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

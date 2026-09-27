@@ -184,7 +184,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtl8192cd')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3-serialdiag\n')
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3.2-preram-safe\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done)
     network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network));check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     matches=[row for row in table if row['id']=='684017' and row['id_len']==3];check('BH25Q64-exact-id-and-geometry',len(matches)==1 and matches[0]['sector_size']==65536 and matches[0]['n_sectors']==128)
     if matches:check('BH25Q64-conservative-flags',matches[0]['flags']==0x2008)

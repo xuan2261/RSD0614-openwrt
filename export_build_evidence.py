@@ -4,7 +4,7 @@ from pathlib import Path
 import argparse,hashlib,json,re,shutil
 from harden_source import DISABLE_KERNEL
 
-def export(tree,out,log):
+def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAILABLE',builder_image_id='NOT_RECORDED'):
     tree=Path(tree);out=Path(out);dest=out/'kernel-evidence';dest.mkdir(parents=True,exist_ok=True)
     candidates=list((tree/'build_dir').glob('target-*/linux-realtek_rtl8197f/linux-4.14.187/.config'))
     if len(candidates)!=1:raise ValueError(f'Expected one generated kernel config, found {len(candidates)}')
@@ -26,10 +26,11 @@ def export(tree,out,log):
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)
         manifest.append({'name':name,'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
-    (dest/'manifest.json').write_text(json.dumps({'files':manifest,'loader_board_values':boards},indent=2)+'\n')
+    provenance={'port_input_fingerprint':port_fingerprint,'project_commit':project_commit,'builder_image_id':builder_image_id}
+    (dest/'manifest.json').write_text(json.dumps({'files':manifest,'loader_board_values':boards,'provenance':provenance},indent=2)+'\n')
     print('GENERATED_KERNEL_CONFIG_AND_SOURCE: PASS; hardware execution remains unverified')
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('tree');p.add_argument('out');p.add_argument('--log',required=True);a=p.parse_args()
-    try:export(a.tree,a.out,a.log)
+    p=argparse.ArgumentParser();p.add_argument('tree');p.add_argument('out');p.add_argument('--log',required=True);p.add_argument('--port-fingerprint',default='NOT_RECORDED');p.add_argument('--project-commit',default='NOT_AVAILABLE');p.add_argument('--builder-image-id',default='NOT_RECORDED');a=p.parse_args()
+    try:export(a.tree,a.out,a.log,port_fingerprint=a.port_fingerprint,project_commit=a.project_commit,builder_image_id=a.builder_image_id)
     except (OSError,ValueError) as e:raise SystemExit('BUILD_EVIDENCE: FAIL: '+str(e))

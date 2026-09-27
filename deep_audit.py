@@ -91,7 +91,7 @@ def find_fdt(payload):
     return found[0]
 
 def parse_cpio(data,base=0):
-    pos=base;entries=[];seen=set()
+    pos=base;entries=[];seen={}
     for _ in range(10000):
         if pos+110>len(data) or data[pos:pos+6] not in (b'070701',b'070702'):raise ValueError('Invalid/truncated newc header')
         crc=data[pos:pos+6]==b'070702';raw=data[pos+6:pos+110]
@@ -109,8 +109,14 @@ def parse_cpio(data,base=0):
         if nxt>len(data):raise ValueError('Truncated CPIO data')
         body=data[dp:dp+size]
         if crc and sum(body)&0xffffffff!=check:raise ValueError('CPIO crc checksum mismatch')
-        if name in seen:raise ValueError('Duplicate CPIO pathname')
-        seen.add(name);entries.append({'path':name,'mode':mode,'inode':ino,'nlink':nlink,'data':body,'hardlink_key':(major,minor,ino),'archive_offset':pos-base});pos=nxt
+        entry={'path':name,'mode':mode,'inode':ino,'uid':uid,'gid':gid,'nlink':nlink,'mtime':mtime,'major':major,'minor':minor,'rmajor':rmajor,'rminor':rminor,'data':body,'hardlink_key':(major,minor,ino),'archive_offset':pos-base}
+        previous=seen.get(name)
+        if previous is not None:
+            semantic=('mode','uid','gid','nlink','mtime','major','minor','rmajor','rminor','data')
+            if any(previous[k]!=entry[k] for k in semantic):raise ValueError('Conflicting duplicate CPIO pathname: '+name)
+            entry['duplicate_of_archive_offset']=previous['archive_offset']
+        else:seen[name]=entry
+        entries.append(entry);pos=nxt
         if name=='TRAILER!!!':
             if size:raise ValueError('Nonempty CPIO trailer')
             return entries,pos
@@ -159,7 +165,7 @@ def flash_table(payload):
     start,rows=next(iter(tables.items()));return rows,start
 
 def audit(image):
-    payload,lz=unpack_lzma(image);tree,dtboff,dtbsize=find_fdt(payload);entries,cpiooff,cpioend=find_cpio(payload);table,tableoff=flash_table(payload);checks=[]
+    payload,lz=unpack_lzma(image);tree,dtboff,dtbsize=find_fdt(payload);entries,cpiooff,cpioend=find_cpio(payload);duplicate_paths=sorted({e['path'] for e in entries if 'duplicate_of_archive_offset' in e});table,tableoff=flash_table(payload);checks=[]
     def check(name,ok,detail=''):checks.append({'check':name,'pass':bool(ok),'detail':detail})
     check('target-compatible',b'rockspace,rsd0614\0' in tree['/'].get('compatible',b''));check('target-model',tree['/'].get('model')==b'Rock Space RSD0614 V1.0\0')
     memories=[p for p in tree.values() if p.get('device_type')==b'memory\0'];check('64MiB-memory',len(memories)==1 and memories[0].get('reg')==struct.pack('>II',0,0x4000000))
@@ -179,11 +185,11 @@ def audit(image):
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtl8192cd')):forbidden.append(name)
     check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3-serialdiag\n')
-    network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network))
+    network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network));check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     matches=[row for row in table if row['id']=='684017' and row['id_len']==3];check('BH25Q64-exact-id-and-geometry',len(matches)==1 and matches[0]['sector_size']==65536 and matches[0]['n_sectors']==128)
     if matches:check('BH25Q64-conservative-flags',matches[0]['flags']==0x2008)
     banner=re.search(rb'Linux version [^\x00\n]+',payload)
-    return {'image_size':len(image),'image_sha256':hashlib.sha256(image).hexdigest(),'lzma':lz,'kernel_banner':banner.group().decode(errors='replace') if banner else None,'dtb_offset_in_payload':dtboff,'dtb_size':dtbsize,'cpio_offset_in_payload':cpiooff,'cpio_end':cpioend,'cpio_entries_including_trailer':len(entries),'flash_table_offset':tableoff,'flash_table_entry_count':len(table),'bh25q64_entries':matches,'checks':checks,'offline_policy_result':'PASS' if all(c['pass'] for c in checks) else 'FAIL','boot_qualification':'NOT YET VERIFIED','ram_boot_authorized':False,'limitations':['No MIPS execution or hardware run.','No proof of kernel BSS/workspace bounds without ELF and runtime review.','Read-only partition flags are not a proof of zero hardware-register writes.','The parser targets this pinned little-endian MIPS32/uncompressed-CPIO pipeline.']}
+    return {'image_size':len(image),'image_sha256':hashlib.sha256(image).hexdigest(),'lzma':lz,'kernel_banner':banner.group().decode(errors='replace') if banner else None,'dtb_offset_in_payload':dtboff,'dtb_size':dtbsize,'cpio_offset_in_payload':cpiooff,'cpio_end':cpioend,'cpio_entries_including_trailer':len(entries),'cpio_duplicate_paths':duplicate_paths,'flash_table_offset':tableoff,'flash_table_entry_count':len(table),'bh25q64_entries':matches,'checks':checks,'offline_policy_result':'PASS' if all(c['pass'] for c in checks) else 'FAIL','boot_qualification':'NOT YET VERIFIED','ram_boot_authorized':False,'limitations':['No MIPS execution or hardware run.','No proof of kernel BSS/workspace bounds without ELF and runtime review.','Read-only partition flags are not a proof of zero hardware-register writes.','The parser targets this pinned little-endian MIPS32/uncompressed-CPIO pipeline.']}
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('image');p.add_argument('--json',type=Path);a=p.parse_args()

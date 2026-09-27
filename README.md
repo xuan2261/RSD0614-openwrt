@@ -12,7 +12,7 @@ The project has already verified on a physical RSD0614 unit:
 - TFTP RAM load at `0x81000000` with `AUTOBURN 0`;
 - a first OpenWrt 4.14.187 RAM-boot reached Linux and selected the RSD0614 DTB;
 - the first candidate stopped shortly after the serial-console handoff, before userspace;
-- the current **v5.3 diagnostic candidate disables SPI, PCIe, WMAC and Ethernet** and adds `initcall_debug ignore_loglevel` to isolate the early-boot blocker.
+- the current **v5.3.3 pre-RAM diagnostic candidate disables SPI, PCIe, WMAC and Ethernet**, adds `initcall_debug ignore_loglevel`, clears/masks unused direct NET/PCIe/WiFi IRQ sources, removes enabled automatic `mount_root` paths, and suppresses generic `eth0`/`eth1` synthesis.
 
 ## Safety contract
 
@@ -42,7 +42,7 @@ Review the generated `out/<timestamp>/` evidence before any physical RAM boot.
 ## GitHub Actions
 
 - **CI / preflight** runs on GitHub-hosted Ubuntu for pushes and pull requests.
-- **Full initramfs build** is manual (`workflow_dispatch`) and runs on a GitHub-hosted Ubuntu VM. It never contacts a router.
+- **Full initramfs build** runs only by explicit `workflow_dispatch` or the controlled `.github/build-trigger` path on a GitHub-hosted Ubuntu VM. It never contacts a router.
 - Build outputs and audit evidence are uploaded as workflow artifacts.
 
 This repository is currently public. GitHub explicitly recommends against attaching a self-hosted runner to a public repository. Keep builds on GitHub-hosted runners unless the repository is made private and the runner threat model is reviewed.

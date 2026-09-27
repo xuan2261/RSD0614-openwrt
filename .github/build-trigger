@@ -1,3 +1,4 @@
-RSD0614 v5.3.1 post-remediation GitHub-hosted build request
-purpose=produce audited initramfs candidate with provenance
+RSD0614 v5.3.2 pre-RAM-safe GitHub-hosted build request
+purpose=produce independently audited RAM-only diagnostic candidate
+safety=direct-device-irqs-masked;mount_root-suppressed
 persistent_flash=NO-GO

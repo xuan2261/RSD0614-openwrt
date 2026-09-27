@@ -1,12 +1,13 @@
 {
-  "version": "5.3.2-preram-safety",
-  "base": "5.3.1-workspacefix",
-  "change": "mask unused direct NET/PCIe/WiFi IRQs after TFTP handoff and suppress mount_root done in RAM-only diagnostic userspace",
-  "volume": "rsd0614-openwrt-v532-work",
-  "volume_label": "rsd0614.work=v5.3.2",
+  "version": "5.3.3-preram-failclosed",
+  "base": "5.3.2-preram-safety",
+  "change": "remove remaining enabled mount_root fallback and suppress generic eth0/eth1 board synthesis",
+  "volume": "rsd0614-openwrt-v533-work",
+  "volume_label": "rsd0614.work=v5.3.3",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
-    "rsd0614-openwrt-v53-work"
+    "rsd0614-openwrt-v53-work",
+    "rsd0614-openwrt-v532-work"
   ],
   "persistent_flash": "NO-GO"
 }

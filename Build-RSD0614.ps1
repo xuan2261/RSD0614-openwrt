@@ -54,7 +54,7 @@ $Volumes = @(& docker volume ls --format '{{.Name}}')
 if ($LASTEXITCODE -ne 0) { throw 'Cannot list Docker volumes.' }
 if ($Volumes -contains $Volume) {
     $Owner = & docker volume inspect $Volume --format '{{ index .Labels "rsd0614.work" }}'
-    if ($LASTEXITCODE -ne 0 -or ($Owner -join '').Trim() -ne 'v5.3') {
+    if ($LASTEXITCODE -ne 0 -or ($Owner -join '').Trim() -ne 'v5.3.2') {
         throw 'Existing work volume has an unexpected ownership label; refusing to use it.'
     }
 } else {

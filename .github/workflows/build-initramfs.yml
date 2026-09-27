@@ -45,6 +45,9 @@ jobs:
             --build-arg DEBIAN_SNAPSHOT=20260901T000000Z \
             -t "$BUILDER_IMAGE" .
 
+      - name: Record builder image identity
+        run: echo "BUILDER_IMAGE_ID=$(docker image inspect "$BUILDER_IMAGE" --format '{{.Id}}')" >> "$GITHUB_ENV"
+
       - name: Builder smoke test
         run: |
           docker run --rm --platform=linux/amd64 --network=none "$BUILDER_IMAGE" \
@@ -74,6 +77,8 @@ jobs:
             --mount "type=bind,source=$GITHUB_WORKSPACE,target=/port,readonly" \
             --mount "type=bind,source=$OUT_DIR,target=/out" \
             --env "JOBS=${{ inputs.jobs || '2' }}" \
+            --env "BUILDER_IMAGE_ID=$BUILDER_IMAGE_ID" \
+            --env "PROJECT_COMMIT=$GITHUB_SHA" \
             --workdir /work \
             "$BUILDER_IMAGE" bash /port/build-rsd0614-initramfs.sh
 

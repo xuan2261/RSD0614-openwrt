@@ -71,7 +71,7 @@ $RunArgs = @('run','--rm','--platform=linux/amd64','--user','1000:1000',
     '--mount',"type=volume,source=$Volume,target=/work",
     '--mount',"type=bind,source=$Here,target=/port,readonly",
     '--mount',"type=bind,source=$OutputDir,target=/out",
-    '--env',"JOBS=$Jobs",'--workdir','/work',$Image,'bash','/port/build-rsd0614-initramfs.sh')
+    '--env',"JOBS=$Jobs",'--env',"BUILDER_IMAGE_ID=$($ImageId -join '')",'--workdir','/work',$Image,'bash','/port/build-rsd0614-initramfs.sh')
 Invoke-DockerLogged -DockerArgs $RunArgs -LogPath (Join-Path $Logs "$RunId-openwrt.log")
 Write-Host "Candidate and evidence: $OutputDir"
 Write-Host 'Do not load or execute the candidate on the router. Binary review is still required.'

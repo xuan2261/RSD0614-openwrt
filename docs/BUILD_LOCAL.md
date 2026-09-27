@@ -1,42 +1,40 @@
-# RSD0614 OpenWrt v5.3 — serial diagnostic
+# RSD0614 OpenWrt v5.3.3 — pre-RAM fail-closed diagnostic
 
-This is a diagnostic rebuild of the v5.2.1 pipeline.
+This build is serial-only and intended for controlled **RAM boot** qualification.
 
-Run:
+Safety state:
+- SPI, Ethernet, PCIe and WMAC remain disabled in the RSD0614 DTB.
+- direct NET/PCIe/WiFi IRQ sources are cleared and masked;
+- enabled startup services do not call `mount_root`;
+- generic board detection does not synthesize `eth0` / `eth1`;
+- persistent flash remains **NO-GO**.
 
-    Set-ExecutionPolicy -Scope Process Bypass
-    .\Test-RSD0614.ps1
+## Local preflight
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\Test-RSD0614.ps1
+```
 
 Require:
 
-    LOCAL_REGRESSION: 89 tests; failures=0; errors=0
-    PREFLIGHT EXECUTION PASS
+```text
+LOCAL_REGRESSION: 101 tests; failures=0; errors=0
+PREFLIGHT EXECUTION PASS
+```
 
-Then:
+## Local build
 
-    .\Build-RSD0614.ps1 -Jobs 2
+```powershell
+.\Build-RSD0614.ps1 -Jobs 2
+```
 
-Do not boot the old v5.2.1 image for this experiment. Use only the new v5.3 output.
-Persistent flash remains NO-GO.
+v5.3.3 uses the dedicated Docker volume:
 
-## v5.3.1 workspace fix
+```text
+rsd0614-openwrt-v533-work
+```
 
-v5.3 changes the port inputs (notably the DTS), so it MUST NOT reuse the v5.2
-source/toolchain workspace. The build's fingerprint guard correctly refuses that reuse.
+Older v5.2/v5.3/v5.3.2 work volumes are intentionally preserved. Do not delete them and do not run `docker volume prune`.
 
-v5.3.1 uses a new Docker named volume:
-
-    rsd0614-openwrt-v53-work
-
-The old `rsd0614-openwrt-v52-work` volume is intentionally preserved.
-
-Run:
-
-    Set-ExecutionPolicy -Scope Process Bypass
-    .\Test-RSD0614.ps1
-
-Then:
-
-    .\Build-RSD0614.ps1 -Jobs 2
-
-Do not delete the old volume and do not use `docker volume prune`.
+A successful compile is not boot proof. Review `BUILD_RESULT.txt`, `BINARY_AUDIT.json`, provenance, the candidate SHA-256 and UART/runtime evidence before changing any hardware gate.

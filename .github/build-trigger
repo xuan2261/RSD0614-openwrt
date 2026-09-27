@@ -1,4 +1,4 @@
-RSD0614 v5.3.2 pre-RAM-safe GitHub-hosted build request
+RSD0614 v5.3.3 pre-RAM fail-closed GitHub-hosted build request
 purpose=produce independently audited RAM-only diagnostic candidate
-safety=direct-device-irqs-masked;mount_root-suppressed
+safety=direct-device-irqs-masked;all-enabled-mount_root-suppressed;default-physical-interface-synthesis-suppressed
 persistent_flash=NO-GO

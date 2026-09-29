@@ -1,13 +1,14 @@
 {
-  "version": "5.3.3-preram-failclosed",
-  "base": "5.3.2-preram-safety",
-  "change": "remove remaining enabled mount_root fallback and suppress generic eth0/eth1 board synthesis",
-  "volume": "rsd0614-openwrt-v533-work",
-  "volume_label": "rsd0614.work=v5.3.3",
+  "version": "5.3.4-uart-rxtx-diagnostic",
+  "base": "5.3.3-preram-failclosed",
+  "change": "apply RTL8197F UART RX/TX register index 9 (+0x24 with regshift=2) to stop RX IRQ storm",
+  "volume": "rsd0614-openwrt-v534-work",
+  "volume_label": "rsd0614.work=v5.3.4",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
-    "rsd0614-openwrt-v532-work"
+    "rsd0614-openwrt-v532-work",
+    "rsd0614-openwrt-v533-work"
   ],
   "persistent_flash": "NO-GO"
 }

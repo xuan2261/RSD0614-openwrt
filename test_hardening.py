@@ -87,6 +87,10 @@ class SourceTests(unittest.TestCase):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v535-work',t);self.assertIn("-ne 'v5.3.5'",t);self.assertIn('rsd0614.work=v5.3.5',t);self.assertNotIn('rsd0614-openwrt-v532-work',t);self.assertNotIn('rsd0614-openwrt-v53-work',t);self.assertNotIn('rsd0614-openwrt-v52-work',t);self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
  def test_deep_audit_runs_before_candidate_result(self):
   t=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertLess(t.index('"$PORT_DIR/deep_audit.py"'),t.index("echo 'COMPILE=PASS'"));self.assertIn('export_build_evidence.py',t)
+ def test_repo_manifest_matches_current_files(self):
+  for line in (ROOT/'REPO_MANIFEST.sha256').read_text().splitlines():
+   if not line.strip():continue
+   digest,rel=line.split(None,1);path=ROOT/rel.strip();self.assertTrue(path.is_file(),rel);self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),digest,rel)
  def test_v535_metadata_and_provenance_wiring(self):
   lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.3.5');self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('vendor WLEN8=0x01',lock['intent']);self.assertIn('BUSY read-USR then replay LCR',lock['intent'])
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)

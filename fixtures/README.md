@@ -20,3 +20,18 @@ only need to read the stored standard LZMA-alone fixture.
 Different encoder versions may produce different valid compressed bytes. A fixture
 update must intentionally update the hash and re-run the real compatibility matrix.
 Never silently regenerate it during tests.
+
+## Linux v4.14.187 UART patch contexts
+
+`fixtures/linux-4.14.187/` contains exact upstream source fixtures from the
+Linux stable `v4.14.187` tag for:
+
+- `include/uapi/linux/serial_reg.h`
+- `drivers/tty/serial/8250/8250_dw.c`
+
+They are test inputs only. The regression suite copies them to a temporary
+directory and requires the RSD0614 UART patch to apply with `patch --fuzz=0`.
+This catches malformed hunks or upstream-context drift before a full OpenWrt
+compile. These files are never installed in the initramfs and never executed on
+the router.
+

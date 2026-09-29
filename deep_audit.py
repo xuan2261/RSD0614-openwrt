@@ -170,6 +170,16 @@ def audit(image):
     check('target-compatible',b'rockspace,rsd0614\0' in tree['/'].get('compatible',b''));check('target-model',tree['/'].get('model')==b'Rock Space RSD0614 V1.0\0')
     memories=[p for p in tree.values() if p.get('device_type')==b'memory\0'];check('64MiB-memory',len(memories)==1 and memories[0].get('reg')==struct.pack('>II',0,0x4000000))
     check('UART-115200-initcall-debug-keep-bootcon',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200 initcall_debug ignore_loglevel keep_bootcon\0')
+    uart=tree.get('/serial@18147000',{})
+    uart_compat=uart.get('compatible',b'')
+    check('RTL8197F-UART-exact-geometry',
+          b'realtek,rtl8197f-uart\0' in uart_compat and b'snps,dw-apb-uart\0' in uart_compat and
+          uart.get('reg')==struct.pack('>II',0x18147000,0x100) and
+          uart.get('interrupts')==struct.pack('>I',9) and
+          uart.get('reg-io-width')==struct.pack('>I',4) and
+          uart.get('reg-shift')==struct.pack('>I',2) and
+          uart.get('clock-frequency')==struct.pack('>I',100000000) and
+          uart.get('status')==b'okay\0')
     for path in ('/spi@18143000','/pcie-controller@18b00000','/pcie-controller@18b20000','/wmac@18640000','/ethernet@18010000'):check('disabled:'+path,tree.get(path,{}).get('status')==b'disabled\0')
     parts={}
     for path,props in tree.items():
@@ -184,7 +194,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtl8192cd')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3.4-uart-rxtx-diagnostic\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3.5-uart-full-quirks\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
     network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network));check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     matches=[row for row in table if row['id']=='684017' and row['id_len']==3];check('BH25Q64-exact-id-and-geometry',len(matches)==1 and matches[0]['sector_size']==65536 and matches[0]['n_sectors']==128)
     if matches:check('BH25Q64-conservative-flags',matches[0]['flags']==0x2008)

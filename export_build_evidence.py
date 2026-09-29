@@ -12,7 +12,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     active=dict(re.findall(r'^(CONFIG_\w+)=(.*)$',config,re.M))
     for key in DISABLE_KERNEL:
         if active.get(key) in ('y','m'):raise ValueError('Unwanted driver/splitter survived config merge: '+key)
-    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F'):
+    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW'):
         if active.get(key)!='y':raise ValueError('Required kernel feature missing: '+key)
     src=linux/'drivers/mtd/spi-nor/spi-nor.c'
     source=src.read_text()
@@ -20,12 +20,32 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
     if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
     uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
-    if '#ifdef CONFIG_SOC_RTL8197F' not in uarttext or not re.search(r'#define\s+UART_RX\s+9\b',uarttext) or not re.search(r'#define\s+UART_TX\s+9\b',uarttext):raise ValueError('RTL8197F UART RX/TX +0x24 register-layout patch missing from compiled source')
+    uart_required=(
+        '#ifdef CONFIG_SOC_RTL8197F' in uarttext and
+        re.search(r'#define\s+UART_RX\s+9\b',uarttext) and
+        re.search(r'#define\s+UART_TX\s+9\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN7\s+0x00\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN8\s+0x01\b',uarttext) and
+        re.search(r'#define\s+UART_IIR_ID\s+0x0e\b',uarttext)
+    )
+    if not uart_required:raise ValueError('RTL8197F UART register/WLEN semantics missing from compiled source')
+    dwsrc=linux/'drivers/tty/serial/8250/8250_dw.c';dwtext=dwsrc.read_text()
+    for token in (
+        'of_device_is_compatible(np, "realtek,rtl8197f-uart")',
+        'data->rtl8197f = true;',
+        'p->type = PORT_16550A;',
+        'p->fifosize = 16;',
+        'data->skip_autocfg = true;',
+        'd->last_lcr = value;',
+        'p->serial_out(p, UART_LCR, d->last_lcr);',
+        '!d->rtl8197f'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F DW8250 quirk missing from compiled source: '+token)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

@@ -1,14 +1,15 @@
 {
-  "version": "5.3.4-uart-rxtx-diagnostic",
-  "base": "5.3.3-preram-failclosed",
-  "change": "apply RTL8197F UART RX/TX register index 9 (+0x24 with regshift=2) to stop RX IRQ storm",
-  "volume": "rsd0614-openwrt-v534-work",
-  "volume_label": "rsd0614.work=v5.3.4",
+  "version": "5.3.5-uart-full-quirks",
+  "base": "5.3.4-uart-rxtx-diagnostic",
+  "change": "complete RTL8197F UART semantics: RX/TX index 9, vendor WLEN encoding, fixed 16550A/FIFO profile, BUSY USR read plus LCR replay",
+  "volume": "rsd0614-openwrt-v535-work",
+  "volume_label": "rsd0614.work=v5.3.5",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
     "rsd0614-openwrt-v532-work",
-    "rsd0614-openwrt-v533-work"
+    "rsd0614-openwrt-v533-work",
+    "rsd0614-openwrt-v534-work"
   ],
   "persistent_flash": "NO-GO"
 }

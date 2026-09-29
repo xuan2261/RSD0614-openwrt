@@ -35,6 +35,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'data->rtl8197f = true;',
         'p->type = PORT_16550A;',
         'p->fifosize = 16;',
+        'up->capabilities |= UART_CAP_FIFO;',
         'data->skip_autocfg = true;',
         'd->last_lcr = value;',
         'p->serial_out(p, UART_LCR, d->last_lcr);',

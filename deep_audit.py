@@ -169,7 +169,7 @@ def audit(image):
     def check(name,ok,detail=''):checks.append({'check':name,'pass':bool(ok),'detail':detail})
     check('target-compatible',b'rockspace,rsd0614\0' in tree['/'].get('compatible',b''));check('target-model',tree['/'].get('model')==b'Rock Space RSD0614 V1.0\0')
     memories=[p for p in tree.values() if p.get('device_type')==b'memory\0'];check('64MiB-memory',len(memories)==1 and memories[0].get('reg')==struct.pack('>II',0,0x4000000))
-    check('UART-115200-initcall-debug',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200 initcall_debug ignore_loglevel\0')
+    check('UART-115200-initcall-debug-keep-bootcon',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200 initcall_debug ignore_loglevel keep_bootcon\0')
     for path in ('/spi@18143000','/pcie-controller@18b00000','/pcie-controller@18b20000','/wmac@18640000','/ethernet@18010000'):check('disabled:'+path,tree.get(path,{}).get('status')==b'disabled\0')
     parts={}
     for path,props in tree.items():

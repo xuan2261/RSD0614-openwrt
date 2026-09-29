@@ -55,7 +55,8 @@ def harden(tree,port,audit,expected=BASE):
     target=checked_path(tree,'target/linux/realtek');old=checked_path(tree,'target/linux/realtek/base-files');mk=checked_path(tree,'target/linux/realtek/image/Makefile');cfg=checked_path(tree,'target/linux/realtek/rtl8197f/config-4.14');irq=checked_path(tree,'target/linux/realtek/files-4.14/arch/mips/realtek/irq.c');boot=checked_path(tree,'package/base-files/files/etc/init.d/boot');defaultnet=checked_path(tree,'package/base-files/files/etc/board.d/99-default_network');patch=checked_path(tree,'target/linux/realtek/patches-4.14/'+PATCH_NAME);uartpatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_PATCH_NAME)
     newmk=patch_image_makefile(mk.read_text());newcfg=patch_kernel_config(cfg.read_text());newirq=patch_irq_source(irq.read_text());newboot=patch_boot_script(boot.read_text());newdefaultnet=patch_default_network_script(defaultnet.read_text());patchdata=(port/'patches'/PATCH_NAME).read_bytes();uartpatchdata=(port/'patches'/UART_PATCH_NAME).read_bytes()
     if not old.is_dir():raise ValueError('Target userspace tree absent')
-    if patch.exists() and patch.read_bytes()!=patchdata:raise ValueError('A different BH25Q64 patch already exists')\n    if uartpatch.exists() and uartpatch.read_bytes()!=uartpatchdata:raise ValueError('A different RTL8197F UART patch already exists')
+    if patch.exists() and patch.read_bytes()!=patchdata:raise ValueError('A different BH25Q64 patch already exists')
+    if uartpatch.exists() and uartpatch.read_bytes()!=uartpatchdata:raise ValueError('A different RTL8197F UART patch already exists')
     existing=tree_records(old);digest=hashlib.sha256(json.dumps(existing,sort_keys=True).encode()).hexdigest();audit.mkdir(parents=True,exist_ok=True);stage=Path(tempfile.mkdtemp(prefix='.rsd0614-userspace-',dir=target));stage.chmod(0o755)
     try:
         for rel,content in BASE_FILES.items():

@@ -92,6 +92,8 @@ class PackagingTests(unittest.TestCase):
  def test_34_dts_peripherals_explicitly_disabled(self):
   t=(ROOT/'RSD0614.dts').read_text()
   for label in ('pcie0','pcie1','wmac','ethernet'):self.assertRegex(t,rf'&{label}\s*\{{\s*status = "disabled";\s*\}};')
+ def test_34b_dts_console_probe_keeps_bootconsole(self):
+  t=(ROOT/'RSD0614.dts').read_text();self.assertIn('bootargs = "console=ttyS0,115200 initcall_debug ignore_loglevel keep_bootcon";',t)
  def test_35_source_commit_locks_preserved(self):
   lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['donor_commit'],profile.EXPECTED_DONOR_COMMIT);self.assertEqual(lock['base_commit'],'8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67');self.assertFalse(lock['ram_boot_authorized'])
  def test_36_build_files_have_no_router_transport_or_flash_commands(self):

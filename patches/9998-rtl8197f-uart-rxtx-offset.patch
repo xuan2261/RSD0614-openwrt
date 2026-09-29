@@ -1,6 +1,6 @@
 --- a/include/uapi/linux/serial_reg.h
 +++ b/include/uapi/linux/serial_reg.h
-@@ -18,8 +18,13 @@
+@@ -18,7 +18,12 @@
  /*
   * DLAB=0
   */

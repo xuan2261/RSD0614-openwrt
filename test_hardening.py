@@ -73,15 +73,22 @@ class SourceTests(unittest.TestCase):
  def test_nor_patch_applies_and_is_conservative(self):
   with tempfile.TemporaryDirectory() as td:
    p=Path(td)/'drivers/mtd/spi-nor/spi-nor.c';p.parent.mkdir(parents=True);p.write_text('/* bounded fixture using pinned upstream table context */\nstatic const struct flash_info spi_nor_ids[] = {\n\t/* Atmel -- some are (confusingly) marketed as "DataFlash" */\n\t{ "at25fs010",  INFO(0x1f6601, 0, 32 * 1024,   4, SECT_4K) },\n\t{ },\n};\n');run=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(ROOT/'patches'/hs.PATCH_NAME)],cwd=td,text=True,capture_output=True);self.assertEqual(run.returncode,0,run.stdout+run.stderr);t=p.read_text();self.assertIn('INFO(0x684017, 0, 64 * 1024, 128',t);self.assertIn('SPI_NOR_NO_FR | SPI_NOR_SKIP_SFDP',t);self.assertNotIn('SPI_NOR_QUAD_READ',t)
- def test_uart_rxtx_patch_applies_and_is_scoped(self):
+ def test_uart_full_patch_applies_to_pinned_linux_414187(self):
   with tempfile.TemporaryDirectory() as td:
-   p=Path(td)/'include/uapi/linux/serial_reg.h';p.parent.mkdir(parents=True);p.write_text('/*\n * DLAB=0\n */\n#define UART_RX\t\t0\t/* In:  Receive buffer */\n#define UART_TX\t\t0\t/* Out: Transmit buffer */\n\n#define UART_IER\t1\t/* Out: Interrupt Enable Register */\n');run=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(ROOT/'patches'/hs.UART_PATCH_NAME)],cwd=td,text=True,capture_output=True);self.assertEqual(run.returncode,0,run.stdout+run.stderr);u=p.read_text();self.assertIn('#ifdef CONFIG_SOC_RTL8197F',u);self.assertRegex(u,r'#define UART_RX\s+9\b');self.assertRegex(u,r'#define UART_TX\s+9\b');self.assertRegex(u,r'#else\n#define UART_RX\s+0\b')
- def test_builder_v534_volume_separate(self):
-  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v534-work',t);self.assertIn("-ne 'v5.3.4'",t);self.assertIn('rsd0614.work=v5.3.4',t);self.assertNotIn('rsd0614-openwrt-v532-work',t);self.assertNotIn('rsd0614-openwrt-v53-work',t);self.assertNotIn('rsd0614-openwrt-v52-work',t);self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
+   root=Path(td);fixture=ROOT/'fixtures/linux-4.14.187'
+   for rel in ('include/uapi/linux/serial_reg.h','drivers/tty/serial/8250/8250_dw.c'):
+    src=fixture/rel;dst=root/rel;dst.parent.mkdir(parents=True,exist_ok=True);dst.write_bytes(src.read_bytes())
+   run=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(ROOT/'patches'/hs.UART_PATCH_NAME)],cwd=td,text=True,capture_output=True);self.assertEqual(run.returncode,0,run.stdout+run.stderr)
+   u=(root/'include/uapi/linux/serial_reg.h').read_text();d=(root/'drivers/tty/serial/8250/8250_dw.c').read_text()
+   self.assertRegex(u,r'#define UART_RX\s+9\b');self.assertRegex(u,r'#define UART_TX\s+9\b');self.assertRegex(u,r'#define UART_LCR_WLEN8\s+0x01\b');self.assertRegex(u,r'#define UART_IIR_ID\s+0x0e\b')
+   for token in ('realtek,rtl8197f-uart','data->rtl8197f = true;','p->type = PORT_16550A;','p->fifosize = 16;','data->skip_autocfg = true;','d->last_lcr = value;','p->serial_out(p, UART_LCR, d->last_lcr);'):self.assertIn(token,d)
+   self.assertNotIn('quot--',(ROOT/'patches'/hs.UART_PATCH_NAME).read_text())
+ def test_builder_v535_volume_separate(self):
+  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v535-work',t);self.assertIn("-ne 'v5.3.5'",t);self.assertIn('rsd0614.work=v5.3.5',t);self.assertNotIn('rsd0614-openwrt-v532-work',t);self.assertNotIn('rsd0614-openwrt-v53-work',t);self.assertNotIn('rsd0614-openwrt-v52-work',t);self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
  def test_deep_audit_runs_before_candidate_result(self):
   t=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertLess(t.index('"$PORT_DIR/deep_audit.py"'),t.index("echo 'COMPILE=PASS'"));self.assertIn('export_build_evidence.py',t)
- def test_v534_metadata_and_provenance_wiring(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.3.4');self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('UART RX/TX index 9',lock['intent'])
+ def test_v535_metadata_and_provenance_wiring(self):
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.3.5');self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('vendor WLEN8=0x01',lock['intent']);self.assertIn('BUSY read-USR then replay LCR',lock['intent'])
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)
   wrapper=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)
   workflow=(ROOT/'.github/workflows/build-initramfs.yml').read_text();self.assertIn('BUILDER_IMAGE_ID=',workflow);self.assertIn('PROJECT_COMMIT=$GITHUB_SHA',workflow)
@@ -121,13 +128,13 @@ class TreeTransactionTests(unittest.TestCase):
   with self.assertRaises(ValueError):hs.harden(self.tree,ROOT,self.tree/'audit',expected=self.head)
 class ExportEvidenceTests(unittest.TestCase):
  def setUp(self):
-  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.tree=self.root/'tree';self.out=self.root/'out';self.linux=self.tree/'build_dir/target-mipsel_24kc_musl/linux-realtek_rtl8197f/linux-4.14.187';self.linux.mkdir(parents=True);(self.linux/'.config').write_text('CONFIG_MTD_SPI_NOR=y\nCONFIG_SPI_SHEIPA=y\nCONFIG_SOC_RTL8197F=y\n')
+  self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.tree=self.root/'tree';self.out=self.root/'out';self.linux=self.tree/'build_dir/target-mipsel_24kc_musl/linux-realtek_rtl8197f/linux-4.14.187';self.linux.mkdir(parents=True);(self.linux/'.config').write_text('CONFIG_MTD_SPI_NOR=y\nCONFIG_SPI_SHEIPA=y\nCONFIG_SOC_RTL8197F=y\nCONFIG_SERIAL_8250=y\nCONFIG_SERIAL_8250_CONSOLE=y\nCONFIG_SERIAL_8250_DW=y\n')
   for n in ('System.map','vmlinux'):(self.linux/n).write_text('explicit fixture')
   for n in ('vmlinux-initramfs.elf','vmlinux-initramfs.debug'):(self.linux.parent/n).write_text('explicit fixture')
-  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_text('#ifdef CONFIG_SOC_RTL8197F\n#define UART_RX 9\n#define UART_TX 9\n#else\n#define UART_RX 0\n#define UART_TX 0\n#endif\n');self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
+  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_text('#ifdef CONFIG_SOC_RTL8197F\n#define UART_RX 9\n#define UART_TX 9\n#define UART_LCR_WLEN7 0x00\n#define UART_LCR_WLEN8 0x01\n#else\n#define UART_RX 0\n#define UART_TX 0\n#define UART_LCR_WLEN7 0x02\n#define UART_LCR_WLEN8 0x03\n#endif\n#define UART_IIR_ID 0x0e\n');dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_text('of_device_is_compatible(np, "realtek,rtl8197f-uart")\ndata->rtl8197f = true;\np->type = PORT_16550A;\np->fifosize = 16;\ndata->skip_autocfg = true;\nd->last_lcr = value;\np->serial_out(p, UART_LCR, d->last_lcr);\n!d->rtl8197f\n');self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
  def tearDown(self):self.tmp.cleanup()
  def test_export_only_records_fixture_not_boot_success(self):
-  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),8);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
+  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),9);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
  def test_export_records_provenance(self):
   from export_build_evidence import export;export(self.tree,self.out,self.log,port_fingerprint='a'*64,project_commit='b'*40,builder_image_id='sha256:'+'c'*64);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(manifest['provenance'],{'port_input_fingerprint':'a'*64,'project_commit':'b'*40,'builder_image_id':'sha256:'+'c'*64})
  def test_wrong_board_rejected(self):
@@ -144,7 +151,10 @@ class ExportEvidenceTests(unittest.TestCase):
   from export_build_evidence import export;(self.linux/'drivers/mtd/spi-nor/spi-nor.c').write_text('not patched')
   with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
  def test_missing_uart_register_layout_rejected(self):
-  from export_build_evidence import export;(self.linux/'include/uapi/linux/serial_reg.h').write_text('#define UART_RX 0\\n#define UART_TX 0\\n')
+  from export_build_evidence import export;(self.linux/'include/uapi/linux/serial_reg.h').write_text('#define UART_RX 0\\n#define UART_TX 0\\n#define UART_LCR_WLEN8 0x03\\n#define UART_IIR_ID 0x0e\\n')
+  with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
+ def test_missing_dw8250_busy_recovery_rejected(self):
+  from export_build_evidence import export;(self.linux/'drivers/tty/serial/8250/8250_dw.c').write_text('generic dw8250 only')
   with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
  def test_missing_irq_hardening_rejected(self):
   from export_build_evidence import export;(self.linux/'arch/mips/realtek/irq.c').write_text(hs.IRQ_UNSAFE_BLOCK+'\n')

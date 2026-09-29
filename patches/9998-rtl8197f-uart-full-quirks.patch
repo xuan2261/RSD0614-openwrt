@@ -95,7 +95,7 @@
 +			p->flags |= UPF_SKIP_TEST | UPF_FIXED_TYPE;
 +			p->type = PORT_16550A;
 +			p->fifosize = 16;
-+			up->capabilities = UART_CAP_FIFO;
++			up->capabilities |= UART_CAP_FIFO;
 +			data->skip_autocfg = true;
 +			data->last_lcr = p->serial_in(p, UART_LCR);
 +		}

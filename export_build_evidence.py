@@ -18,12 +18,12 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     source=src.read_text()
     if not re.search(r'"bh25q64"\s*,\s*INFO\(0x684017',source):raise ValueError('BH25Q64 patch missing from compiled source')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
-    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
+    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')\n    uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()\n    if '#ifdef CONFIG_SOC_RTL8197F' not in uarttext or not re.search(r'#define\\s+UART_RX\\s+9\\b',uarttext) or not re.search(r'#define\\s+UART_TX\\s+9\\b',uarttext):raise ValueError('RTL8197F UART RX/TX +0x24 register-layout patch missing from compiled source')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

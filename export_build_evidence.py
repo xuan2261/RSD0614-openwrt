@@ -35,7 +35,6 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'data->tx_reg = 9;',
         'data->rx_reg = 9;',
         'data->adjlcr=true;',
-        'value -= 2;',
         'p->type = PORT_16550A;',
         'data->skip_autocfg = true;',
         'd->last_lcr = value;',

@@ -1,0 +1,63 @@
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -104,16 +104,38 @@
+ 	(void)p->serial_in(p, UART_RX);
+ }
+ 
++static int rtl8197f_dl_read(struct uart_8250_port *up)
++{
++	struct uart_port *p = &up->port;
++	unsigned int dll, dlm;
++
++	dll = readl(p->membase + (UART_DLL << p->regshift)) & 0xff;
++	dlm = readl(p->membase + (UART_DLM << p->regshift)) & 0xff;
++
++	return dll | (dlm << 8);
++}
++
++static void rtl8197f_dl_write(struct uart_8250_port *up, int value)
++{
++	struct uart_port *p = &up->port;
++
++	writel(value & 0xff,
++	       p->membase + (UART_DLL << p->regshift));
++	writel((value >> 8) & 0xff,
++	       p->membase + (UART_DLM << p->regshift));
++}
++
+ static void dw8250_check_lcr(struct uart_port *p, int value)
+ {
+ 	void __iomem *offset = p->membase + (UART_LCR << p->regshift);
+ 	int tries = 1000;
+ 	struct dw8250_data *d = p->private_data;
+ 
+-	if(d->adjlcr)
+-	{
+-		if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)
+-			value -= 2;
++	if (d->adjlcr) {
++		unsigned int wlen = value & UART_LCR_WLEN8;
++
++		if (wlen == UART_LCR_WLEN7 || wlen == UART_LCR_WLEN8)
++			value = (value & ~UART_LCR_WLEN8) | (wlen - 2);
+ 		d->last_lcr = value;
+ 	}
+ 
+@@ -433,6 +455,8 @@
+ 
+ static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
+ {
++	struct uart_8250_port *up = up_to_u8250p(p);
++
+ 	if (p->dev->of_node) {
+ 		struct device_node *np = p->dev->of_node;
+ 		int id;
+@@ -458,6 +482,8 @@
+ 			data->rx_reg = 9;
+ 			data->adjlcr=true;
+ 			data->skip_autocfg = true;
++			up->dl_read = rtl8197f_dl_read;
++			up->dl_write = rtl8197f_dl_write;
+ 			data->last_lcr = p->serial_in(p, UART_LCR);
+ 		}
+ 

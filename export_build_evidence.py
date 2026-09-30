@@ -43,6 +43,23 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'data->last_lcr = p->serial_in(p, UART_LCR);'
     ):
         if token not in dwtext:raise ValueError('RTL8197F post-0004/BUSY-replay semantic missing from compiled source: '+token)
+    for token in (
+        'static void rtl8197f_diag_irq(',
+        'd->diag_total == 512',
+        'd->diag_msi++',
+        'd->diag_thri++',
+        'd->diag_rdi++',
+        'd->diag_rlsi++',
+        'd->diag_busy++',
+        'd->diag_timeout++',
+        'iir_lsr = p->serial_in(p, UART_IIR);',
+        'iir_msr = p->serial_in(p, UART_IIR);',
+        'iir_usr = p->serial_in(p, UART_IIR);',
+        'iir_rx = p->serial_in(p, UART_IIR);',
+        'printk_deferred(KERN_ERR',
+        'rtl8197f-uart-diag:'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F bounded IRQ-cause diagnostic missing from compiled source: '+token)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))

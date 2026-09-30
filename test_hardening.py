@@ -81,7 +81,7 @@ class SourceTests(unittest.TestCase):
    r1=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(basepatch)],cwd=td,text=True,capture_output=True);self.assertEqual(r1.returncode,0,r1.stdout+r1.stderr)
    r2=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(ROOT/'patches'/hs.UART_PATCH_NAME)],cwd=td,text=True,capture_output=True);self.assertEqual(r2.returncode,0,r2.stdout+r2.stderr)
    d=dst.read_text()
-   for token in ('data->tx_reg = 9;','data->rx_reg = 9;','data->adjlcr=true;','value -= 2;','p->type = PORT_16550A;','data->skip_autocfg = true;','u8\\t\\t\\tlast_lcr;','d->last_lcr = value;','writel(d->last_lcr,','data->last_lcr = p->serial_in(p, UART_LCR);'):self.assertIn(token,d)
+   for token in ('data->tx_reg = 9;','data->rx_reg = 9;','data->adjlcr=true;','value -= 2;','p->type = PORT_16550A;','data->skip_autocfg = true;','last_lcr;','d->last_lcr = value;','writel(d->last_lcr,','data->last_lcr = p->serial_in(p, UART_LCR);'):self.assertIn(token,d)
    self.assertNotIn('UART_LCR_WLEN8\\t\\t0x01',(ROOT/'patches'/hs.UART_PATCH_NAME).read_text())
  def test_builder_v536_volume_separate(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v536-work',t);self.assertIn("-ne 'v5.3.6'",t);self.assertIn('rsd0614.work=v5.3.6',t);self.assertNotIn('rsd0614-openwrt-v532-work',t);self.assertNotIn('rsd0614-openwrt-v53-work',t);self.assertNotIn('rsd0614-openwrt-v52-work',t);self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)

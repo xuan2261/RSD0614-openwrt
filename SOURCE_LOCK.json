@@ -11,5 +11,5 @@
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only RAM diagnostic; keep_bootcon enabled; retain OpenWrt base 0004 RTL8197F RX/TX mapping and v5.3.6 BUSY replay; add bounded non-invasive IIR classification for first 511 handler passes, then a one-shot pass-512 clear-source snapshot (LSR->MSR->USR->RX with IIR after each) using printk_deferred; SPI/PCIe/WMAC/Ethernet disabled; persistent-root auto paths suppressed; default physical network synthesis suppressed"
+  "intent": "serial-only RAM diagnostic; keep_bootcon enabled; retain OpenWrt base 0004 RTL8197F RX/TX mapping and v5.3.6 BUSY replay; add bounded non-invasive IIR classification for first 511 handler passes, then a one-shot pass-512 clear-source snapshot (LSR->MSR->USR->RX with IIR after each) using printk_deferred; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

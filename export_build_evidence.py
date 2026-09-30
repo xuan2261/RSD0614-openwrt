@@ -60,6 +60,19 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'rtl8197f-uart-diag:'
     ):
         if token not in dwtext:raise ValueError('RTL8197F bounded IRQ-cause diagnostic missing from compiled source: '+token)
+    for token in (
+        'static int rtl8197f_dl_read(struct uart_8250_port *up)',
+        'static void rtl8197f_dl_write(struct uart_8250_port *up, int value)',
+        'UART_DLL << p->regshift',
+        'UART_DLM << p->regshift',
+        'unsigned int wlen = value & UART_LCR_WLEN8;',
+        'value = (value & ~UART_LCR_WLEN8) | (wlen - 2);',
+        'up->dl_read = rtl8197f_dl_read;',
+        'up->dl_write = rtl8197f_dl_write;'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F v5.3.8 register semantic missing from compiled source: '+token)
+    if 'if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)' in dwtext:
+        raise ValueError('Stale whole-value RTL8197F LCR adjustment survived compiled source')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))

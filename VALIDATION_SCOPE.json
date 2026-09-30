@@ -21,6 +21,6 @@
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.3.6: kernel/userspace PASS; compiled BUSY replay present; interactive UART still FAIL with persistent irq17 storm",
-  "preflight": "NOT YET VERIFIED FOR v5.3.7",
+  "preflight": "PASS on GitHub Actions run 36696846584",
   "previous_build_result": "v5.3.5 run 36666908482: preflight-in-builder PASS; compile FAIL because 9998 conflicted with earlier OpenWrt patch 0004"
 }

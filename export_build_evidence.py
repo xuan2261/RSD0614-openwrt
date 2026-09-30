@@ -29,6 +29,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     )
     if not uart_required:raise ValueError('Generic serial_reg.h was unexpectedly changed; RTL8197F mapping must stay in post-0004 DW8250 source')
     dwsrc=linux/'drivers/tty/serial/8250/8250_dw.c';dwtext=dwsrc.read_text()
+    if not re.search(r'\bu8\s+last_lcr\s*;',dwtext):raise ValueError('RTL8197F BUSY-replay last_lcr field missing from compiled source')
     for token in (
         'of_device_is_compatible(np, "realtek,rtl8197f-uart")',
         'data->tx_reg = 9;',
@@ -37,7 +38,6 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'value -= 2;',
         'p->type = PORT_16550A;',
         'data->skip_autocfg = true;',
-        'u8\t\t\tlast_lcr;',
         'd->last_lcr = value;',
         'writel(d->last_lcr,',
         'data->last_lcr = p->serial_in(p, UART_LCR);'

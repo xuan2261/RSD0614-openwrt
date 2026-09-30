@@ -35,3 +35,16 @@ This catches malformed hunks or upstream-context drift before a full OpenWrt
 compile. These files are never installed in the initramfs and never executed on
 the router.
 
+## OpenWrt RTL8197F UART patch-stack fixture
+
+`fixtures/openwrt-realtek/0004-rtl8197f-dw-uart.patch` is the exact base
+patch from the pinned OpenWrt source commit. The UART regression applies:
+
+1. upstream Linux `v4.14.187` `8250_dw.c`;
+2. the pinned OpenWrt Realtek `0004` patch with `--fuzz=0`;
+3. the local `9998-rtl8197f-uart-busy-replay.patch` with `--fuzz=0`.
+
+This models the actual OpenWrt patch order and prevents a patch that only applies
+to vanilla Linux from passing preflight. The fixture is test-only and is never
+installed in the firmware.
+

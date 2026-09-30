@@ -88,9 +88,15 @@ class SourceTests(unittest.TestCase):
  def test_deep_audit_runs_before_candidate_result(self):
   t=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertLess(t.index('"$PORT_DIR/deep_audit.py"'),t.index("echo 'COMPILE=PASS'"));self.assertIn('export_build_evidence.py',t)
  def test_repo_manifest_matches_current_files(self):
+  missing=[];mismatch=[]
   for line in (ROOT/'REPO_MANIFEST.sha256').read_text().splitlines():
    if not line.strip():continue
-   digest,rel=line.split(None,1);path=ROOT/rel.strip();self.assertTrue(path.is_file(),rel);self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),digest,rel)
+   digest,rel=line.split(None,1);rel=rel.strip();path=ROOT/rel
+   if not path.is_file():missing.append(rel);continue
+   actual=hashlib.sha256(path.read_bytes()).hexdigest()
+   if actual!=digest:mismatch.append((rel,digest,actual))
+  self.assertEqual(missing,[],f'missing manifest files: {missing}')
+  self.assertEqual(mismatch,[],f'manifest hash drift: {mismatch}')
  def test_v535_metadata_and_provenance_wiring(self):
   lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.3.5');self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('vendor WLEN8=0x01',lock['intent']);self.assertIn('BUSY read-USR then replay LCR',lock['intent'])
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)

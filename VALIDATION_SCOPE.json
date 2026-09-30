@@ -1,5 +1,5 @@
 {
-  "bundle_version": "5.3.5",
+  "bundle_version": "5.3.6",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
   "regression_tests_per_run": 105,
   "failures": 0,
@@ -16,10 +16,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "NOT YET VERIFIED FOR v5.3.5",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.3.5",
+  "openwrt_compile": "NOT YET VERIFIED FOR v5.3.6",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.3.6",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.3.4: kernel/userspace PASS; interactive UART RX FAIL (IRQ17 storm)",
-  "preflight": "PASS on run 36646455869 before metadata-only refresh"
+  "preflight": "NOT YET VERIFIED FOR v5.3.6",
+  "previous_build_result": "v5.3.5: preflight PASS; full build FAIL because 9998 was authored against vanilla 4.14.187 instead of post-OpenWrt-0004 source"
 }

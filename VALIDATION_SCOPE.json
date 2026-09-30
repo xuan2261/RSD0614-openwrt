@@ -1,7 +1,7 @@
 {
   "bundle_version": "5.3.8",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 110,
+  "regression_tests_per_run": 111,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -21,6 +21,6 @@
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.3.7: RX timeout dominates (441/512); IIR remains 0xCC through LSR/MSR/USR/RX reads; LCR observed 0x13, proving composite LCR bypasses whole-value adjlcr",
-  "preflight": "NOT YET VERIFIED FOR v5.3.8",
+  "preflight": "PASS on GitHub Actions run 36710173000",
   "previous_build_result": "v5.3.5 run 36666908482: preflight-in-builder PASS; compile FAIL because 9998 conflicted with earlier OpenWrt patch 0004"
 }

@@ -21,27 +21,28 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
     uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
     uart_required=(
-        '#ifdef CONFIG_SOC_RTL8197F' in uarttext and
-        re.search(r'#define\s+UART_RX\s+9\b',uarttext) and
-        re.search(r'#define\s+UART_TX\s+9\b',uarttext) and
-        re.search(r'#define\s+UART_LCR_WLEN7\s+0x00\b',uarttext) and
-        re.search(r'#define\s+UART_LCR_WLEN8\s+0x01\b',uarttext) and
+        re.search(r'#define\s+UART_RX\s+0\b',uarttext) and
+        re.search(r'#define\s+UART_TX\s+0\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN7\s+0x02\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN8\s+0x03\b',uarttext) and
         re.search(r'#define\s+UART_IIR_ID\s+0x0e\b',uarttext)
     )
-    if not uart_required:raise ValueError('RTL8197F UART register/WLEN semantics missing from compiled source')
+    if not uart_required:raise ValueError('Generic serial_reg.h was unexpectedly changed; RTL8197F mapping must stay in post-0004 DW8250 source')
     dwsrc=linux/'drivers/tty/serial/8250/8250_dw.c';dwtext=dwsrc.read_text()
     for token in (
         'of_device_is_compatible(np, "realtek,rtl8197f-uart")',
-        'data->rtl8197f = true;',
+        'data->tx_reg = 9;',
+        'data->rx_reg = 9;',
+        'data->adjlcr=true;',
+        'value -= 2;',
         'p->type = PORT_16550A;',
-        'p->fifosize = 16;',
-        'up->capabilities |= UART_CAP_FIFO;',
         'data->skip_autocfg = true;',
+        'u8\t\t\tlast_lcr;',
         'd->last_lcr = value;',
-        'p->serial_out(p, UART_LCR, d->last_lcr);',
-        '!d->rtl8197f'
+        'writel(d->last_lcr,',
+        'data->last_lcr = p->serial_in(p, UART_LCR);'
     ):
-        if token not in dwtext:raise ValueError('RTL8197F DW8250 quirk missing from compiled source: '+token)
+        if token not in dwtext:raise ValueError('RTL8197F post-0004/BUSY-replay semantic missing from compiled source: '+token)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))

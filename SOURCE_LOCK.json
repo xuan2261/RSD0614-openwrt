@@ -6,10 +6,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.3.5",
+  "bundle_version": "5.3.6",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only RAM diagnostic; keep_bootcon enabled; complete RTL8197F UART semantics (RX/TX index 9 at +0x24, vendor WLEN8=0x01, fixed PORT_16550A/FIFO16/skip-autocfg, BUSY read-USR then replay LCR); SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "serial-only RAM diagnostic; keep_bootcon enabled; OpenWrt base patch 0004 owns RTL8197F dynamic RX/TX index 9, adjlcr, fixed PORT_16550A and skip-autoconfig; v5.3.6 adds only missing DesignWare BUSY recovery (save adjusted LCR, read USR, replay LCR); SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

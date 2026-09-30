@@ -8,7 +8,7 @@
  	int			line;
  	int			msr_mask_on;
  	int			msr_mask_off;
-@@ -103,10 +104,12 @@
+@@ -103,8 +104,9 @@
  	if(d->adjlcr)
  	{
  		if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)

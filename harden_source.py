@@ -56,7 +56,8 @@ def harden(tree,port,audit,expected=BASE):
     newmk=patch_image_makefile(mk.read_text());newcfg=patch_kernel_config(cfg.read_text());newirq=patch_irq_source(irq.read_text());newboot=patch_boot_script(boot.read_text());newdefaultnet=patch_default_network_script(defaultnet.read_text());patchdata=(port/'patches'/PATCH_NAME).read_bytes();uartpatchdata=(port/'patches'/UART_PATCH_NAME).read_bytes();uartdiagdata=(port/'patches'/UART_DIAG_PATCH_NAME).read_bytes()
     if not old.is_dir():raise ValueError('Target userspace tree absent')
     if patch.exists() and patch.read_bytes()!=patchdata:raise ValueError('A different BH25Q64 patch already exists')
-    if uartpatch.exists() and uartpatch.read_bytes()!=uartpatchdata:raise ValueError('A different RTL8197F UART patch already exists')\n    if uartdiag.exists() and uartdiag.read_bytes()!=uartdiagdata:raise ValueError('A different RTL8197F UART diagnostic patch already exists')
+    if uartpatch.exists() and uartpatch.read_bytes()!=uartpatchdata:raise ValueError('A different RTL8197F UART patch already exists')
+    if uartdiag.exists() and uartdiag.read_bytes()!=uartdiagdata:raise ValueError('A different RTL8197F UART diagnostic patch already exists')
     existing=tree_records(old);digest=hashlib.sha256(json.dumps(existing,sort_keys=True).encode()).hexdigest();audit.mkdir(parents=True,exist_ok=True);stage=Path(tempfile.mkdtemp(prefix='.rsd0614-userspace-',dir=target));stage.chmod(0o755)
     try:
         for rel,content in BASE_FILES.items():

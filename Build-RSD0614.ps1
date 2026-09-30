@@ -9,7 +9,7 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 $Here = $PSScriptRoot
 $Image = 'rsd0614-openwrt-builder:v5.1'
-$Volume = 'rsd0614-openwrt-v536-work'
+$Volume = 'rsd0614-openwrt-v537-work'
 $RunId = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $Logs = Join-Path $Here 'logs'
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
@@ -54,11 +54,11 @@ $Volumes = @(& docker volume ls --format '{{.Name}}')
 if ($LASTEXITCODE -ne 0) { throw 'Cannot list Docker volumes.' }
 if ($Volumes -contains $Volume) {
     $Owner = & docker volume inspect $Volume --format '{{ index .Labels "rsd0614.work" }}'
-    if ($LASTEXITCODE -ne 0 -or ($Owner -join '').Trim() -ne 'v5.3.6') {
+    if ($LASTEXITCODE -ne 0 -or ($Owner -join '').Trim() -ne 'v5.3.7') {
         throw 'Existing work volume has an unexpected ownership label; refusing to use it.'
     }
 } else {
-    & docker volume create --label 'rsd0614.work=v5.3.6' $Volume | Out-Host
+    & docker volume create --label 'rsd0614.work=v5.3.7' $Volume | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Could not create the dedicated Linux work volume.' }
 }
 # Chown only the root of this dedicated volume; do not touch the host filesystem.

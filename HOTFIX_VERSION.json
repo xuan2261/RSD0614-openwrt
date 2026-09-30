@@ -1,15 +1,16 @@
 {
-  "version": "5.3.5-uart-full-quirks",
-  "base": "5.3.4-uart-rxtx-diagnostic",
-  "change": "complete RTL8197F UART semantics: RX/TX index 9, vendor WLEN encoding, fixed 16550A/FIFO profile, BUSY USR read plus LCR replay",
-  "volume": "rsd0614-openwrt-v535-work",
-  "volume_label": "rsd0614.work=v5.3.5",
+  "version": "5.3.6-uart-busy-replay",
+  "base": "5.3.5-uart-full-quirks-compile-failed",
+  "change": "apply only the missing RTL8197F DesignWare BUSY recovery after OpenWrt base patch 0004: save adjusted LCR, read USR, replay LCR",
+  "volume": "rsd0614-openwrt-v536-work",
+  "volume_label": "rsd0614.work=v5.3.6",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
     "rsd0614-openwrt-v532-work",
     "rsd0614-openwrt-v533-work",
-    "rsd0614-openwrt-v534-work"
+    "rsd0614-openwrt-v534-work",
+    "rsd0614-openwrt-v535-work"
   ],
   "persistent_flash": "NO-GO"
 }

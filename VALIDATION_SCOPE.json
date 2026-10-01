@@ -1,7 +1,7 @@
 {
   "bundle_version": "5.3.8",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 111,
+  "regression_tests_per_run": 112,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -16,11 +16,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "NOT YET VERIFIED FOR v5.3.8",
+  "openwrt_compile": "run 36713177861 compiled kernel and produced RSD0614 initramfs image; candidate qualification stopped at build_evidence",
   "hardware_runtime": "NOT YET VERIFIED FOR v5.3.8",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.3.7: RX timeout dominates (441/512); IIR remains 0xCC through LSR/MSR/USR/RX reads; LCR observed 0x13, proving composite LCR bypasses whole-value adjlcr",
-  "preflight": "PASS on GitHub Actions run 36710173000",
-  "previous_build_result": "v5.3.5 run 36666908482: preflight-in-builder PASS; compile FAIL because 9998 conflicted with earlier OpenWrt patch 0004"
+  "preflight": "NOT YET VERIFIED after source-prefetch hardening",
+  "previous_build_result": "v5.3.8 run 36713177861: kernel/image compile completed; BUILD_EVIDENCE false-negative on stale pre-v5.3.8 token 'value -= 2;' at old commit 15dc9eac; branch evidence gate subsequently repaired"
 }

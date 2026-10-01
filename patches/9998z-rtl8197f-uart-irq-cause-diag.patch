@@ -1,0 +1,112 @@
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -61,6 +61,14 @@
+ 	u8			tx_reg;
+ 	u8			rx_reg;
+ 	u8			last_lcr;
++	u16			diag_total;
++	u16			diag_msi;
++	u16			diag_thri;
++	u16			diag_rdi;
++	u16			diag_rlsi;
++	u16			diag_busy;
++	u16			diag_timeout;
++	u16			diag_other;
+ 	int			line;
+ 	int			msr_mask_on;
+ 	int			msr_mask_off;
+@@ -72,6 +80,7 @@
+ 	unsigned int		skip_autocfg:1;
+ 	unsigned int		uart_16550_compatible:1;
+ 	unsigned int		adjlcr:1;
++	unsigned int		diag_dumped:1;
+ };
+ 
+ static inline int dw8250_modify_msr(struct uart_port *p, int offset, int value)
+@@ -227,6 +236,77 @@
+ }
+ 
+ 
++
++static void rtl8197f_diag_irq(struct uart_port *p, struct dw8250_data *d,
++			      unsigned int iir)
++{
++	unsigned int id = iir & 0x3f;
++
++	if (!d->adjlcr || d->diag_dumped)
++		return;
++
++	d->diag_total++;
++	switch (id) {
++	case UART_IIR_MSI:
++		d->diag_msi++;
++		break;
++	case UART_IIR_THRI:
++		d->diag_thri++;
++		break;
++	case UART_IIR_RDI:
++		d->diag_rdi++;
++		break;
++	case UART_IIR_RLSI:
++		d->diag_rlsi++;
++		break;
++	case UART_IIR_BUSY:
++		d->diag_busy++;
++		break;
++	case UART_IIR_RX_TIMEOUT:
++		d->diag_timeout++;
++		break;
++	default:
++		d->diag_other++;
++		break;
++	}
++
++	/*
++	 * Stay non-invasive for the first 511 passes. At pass 512 the
++	 * shared-IRQ core is about to hit PASS_LIMIT anyway, so take one
++	 * ordered snapshot. Re-reading IIR after each standard clear-source
++	 * register identifies which condition actually deasserts the IRQ.
++	 */
++	if (d->diag_total == 512) {
++		unsigned int iir0, iir_lsr, iir_msr, iir_usr, iir_rx;
++		unsigned int lsr, msr, usr, rbr, ier, lcr, stsr;
++
++		iir0 = p->serial_in(p, UART_IIR);
++		ier = p->serial_in(p, UART_IER);
++		lcr = p->serial_in(p, UART_LCR);
++		stsr = readl(p->membase + (8 << p->regshift));
++
++		lsr = p->serial_in(p, UART_LSR);
++		iir_lsr = p->serial_in(p, UART_IIR);
++		msr = p->serial_in(p, UART_MSR);
++		iir_msr = p->serial_in(p, UART_IIR);
++		usr = readl(p->membase + (d->usr_reg << p->regshift));
++		iir_usr = p->serial_in(p, UART_IIR);
++		rbr = p->serial_in(p, UART_RX);
++		iir_rx = p->serial_in(p, UART_IIR);
++
++		d->diag_dumped = true;
++		printk_deferred(KERN_ERR
++			"rtl8197f-uart-diag: n=%u msi=%u thri=%u rdi=%u rlsi=%u busy=%u timeout=%u other=%u\n",
++			d->diag_total, d->diag_msi, d->diag_thri, d->diag_rdi,
++			d->diag_rlsi, d->diag_busy, d->diag_timeout,
++			d->diag_other);
++		printk_deferred(KERN_ERR
++			"rtl8197f-uart-diag: iir=%02x->lsr:%02x->msr:%02x->usr:%02x->rx:%02x lsr=%02x msr=%02x usr=%02x rbr=%02x ier=%02x lcr=%02x stsr=%08x last_lcr=%02x\n",
++			iir0, iir_lsr, iir_msr, iir_usr, iir_rx, lsr, msr,
++			usr, rbr, ier, lcr, stsr, d->last_lcr);
++	}
++}
++
+ static int dw8250_handle_irq(struct uart_port *p)
+ {
+ 	struct uart_8250_port *up = up_to_u8250p(p);
+@@ -235,6 +315,8 @@
+ 	unsigned int status;
+ 	unsigned long flags;
+ 
++	rtl8197f_diag_irq(p, d, iir);
++
+ 	/*
+ 	 * There are ways to get Designware-based UARTs into a state where
+ 	 * they are asserting UART_IIR_RX_TIMEOUT but there is no actual

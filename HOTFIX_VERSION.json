@@ -1,13 +1,18 @@
 {
-  "version": "5.3.3-preram-failclosed",
-  "base": "5.3.2-preram-safety",
-  "change": "remove remaining enabled mount_root fallback and suppress generic eth0/eth1 board synthesis",
-  "volume": "rsd0614-openwrt-v533-work",
-  "volume_label": "rsd0614.work=v5.3.3",
+  "version": "5.3.8-uart-register-semantics",
+  "base": "5.3.7-uart-irq-cause-hardware-diagnosed",
+  "change": "fix RTL8197F composite LCR WLEN translation and DLAB divisor-latch access while retaining bounded IRQ diagnostics for hardware validation",
+  "volume": "rsd0614-openwrt-v538-work",
+  "volume_label": "rsd0614.work=v5.3.8",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
-    "rsd0614-openwrt-v532-work"
+    "rsd0614-openwrt-v532-work",
+    "rsd0614-openwrt-v533-work",
+    "rsd0614-openwrt-v534-work",
+    "rsd0614-openwrt-v535-work",
+    "rsd0614-openwrt-v536-work",
+    "rsd0614-openwrt-v537-work"
   ],
   "persistent_flash": "NO-GO"
 }

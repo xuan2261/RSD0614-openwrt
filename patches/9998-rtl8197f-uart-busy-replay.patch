@@ -1,0 +1,38 @@
+--- a/drivers/tty/serial/8250/8250_dw.c
++++ b/drivers/tty/serial/8250/8250_dw.c
+@@ -60,6 +60,7 @@
+ 	u8			usr_reg;
+ 	u8			tx_reg;
+ 	u8			rx_reg;
++	u8			last_lcr;
+ 	int			line;
+ 	int			msr_mask_on;
+ 	int			msr_mask_off;
+@@ -103,8 +104,9 @@
+ 	if(d->adjlcr)
+ 	{
+ 		if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)
+ 			value -= 2;
++		d->last_lcr = value;
+ 	}
+ 
+ 	/* Make sure LCR write wasn't ignored */
+ 	while (tries--) {
+@@ -262,6 +265,9 @@
+ 	if ((iir & UART_IIR_BUSY) == UART_IIR_BUSY) {
+ 		/* Clear the USR */
+ 		(void)p->serial_in(p, d->usr_reg);
++		if (d->adjlcr)
++			writel(d->last_lcr,
++			       p->membase + (UART_LCR << p->regshift));
+ 
+ 		return 1;
+ 	}
+@@ -375,6 +381,7 @@
+ 			data->rx_reg = 9;
+ 			data->adjlcr=true;
+ 			data->skip_autocfg = true;
++			data->last_lcr = p->serial_in(p, UART_LCR);
+ 		}
+ 
+ 		if (of_device_is_big_endian(p->dev->of_node)) {

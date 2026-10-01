@@ -12,18 +12,71 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     active=dict(re.findall(r'^(CONFIG_\w+)=(.*)$',config,re.M))
     for key in DISABLE_KERNEL:
         if active.get(key) in ('y','m'):raise ValueError('Unwanted driver/splitter survived config merge: '+key)
-    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F'):
+    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW'):
         if active.get(key)!='y':raise ValueError('Required kernel feature missing: '+key)
     src=linux/'drivers/mtd/spi-nor/spi-nor.c'
     source=src.read_text()
     if not re.search(r'"bh25q64"\s*,\s*INFO\(0x684017',source):raise ValueError('BH25Q64 patch missing from compiled source')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
     if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
+    uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
+    uart_required=(
+        re.search(r'#define\s+UART_RX\s+0\b',uarttext) and
+        re.search(r'#define\s+UART_TX\s+0\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN7\s+0x02\b',uarttext) and
+        re.search(r'#define\s+UART_LCR_WLEN8\s+0x03\b',uarttext) and
+        re.search(r'#define\s+UART_IIR_ID\s+0x0e\b',uarttext)
+    )
+    if not uart_required:raise ValueError('Generic serial_reg.h was unexpectedly changed; RTL8197F mapping must stay in post-0004 DW8250 source')
+    dwsrc=linux/'drivers/tty/serial/8250/8250_dw.c';dwtext=dwsrc.read_text()
+    if not re.search(r'\bu8\s+last_lcr\s*;',dwtext):raise ValueError('RTL8197F BUSY-replay last_lcr field missing from compiled source')
+    for token in (
+        'of_device_is_compatible(np, "realtek,rtl8197f-uart")',
+        'data->tx_reg = 9;',
+        'data->rx_reg = 9;',
+        'data->adjlcr=true;',
+        'p->type = PORT_16550A;',
+        'data->skip_autocfg = true;',
+        'd->last_lcr = value;',
+        'writel(d->last_lcr,',
+        'data->last_lcr = p->serial_in(p, UART_LCR);'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F post-0004/BUSY-replay semantic missing from compiled source: '+token)
+    for token in (
+        'static void rtl8197f_diag_irq(',
+        'd->diag_total == 512',
+        'd->diag_msi++',
+        'd->diag_thri++',
+        'd->diag_rdi++',
+        'd->diag_rlsi++',
+        'd->diag_busy++',
+        'd->diag_timeout++',
+        'iir_lsr = p->serial_in(p, UART_IIR);',
+        'iir_msr = p->serial_in(p, UART_IIR);',
+        'iir_usr = p->serial_in(p, UART_IIR);',
+        'iir_rx = p->serial_in(p, UART_IIR);',
+        'printk_deferred(KERN_ERR',
+        'rtl8197f-uart-diag:'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F bounded IRQ-cause diagnostic missing from compiled source: '+token)
+    for token in (
+        'static int rtl8197f_dl_read(struct uart_8250_port *up)',
+        'static void rtl8197f_dl_write(struct uart_8250_port *up, int value)',
+        'UART_DLL << p->regshift',
+        'UART_DLM << p->regshift',
+        'unsigned int wlen = value & UART_LCR_WLEN8;',
+        'value = (value & ~UART_LCR_WLEN8) | (wlen - 2);',
+        'up->dl_read = rtl8197f_dl_read;',
+        'up->dl_write = rtl8197f_dl_write;'
+    ):
+        if token not in dwtext:raise ValueError('RTL8197F v5.3.8 register semantic missing from compiled source: '+token)
+    if 'if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)' in dwtext:
+        raise ValueError('Stale whole-value RTL8197F LCR adjustment survived compiled source')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

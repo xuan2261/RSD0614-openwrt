@@ -6,10 +6,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.3.3",
+  "bundle_version": "5.3.8",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only pre-RAM diagnostic; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "serial-only RAM validation candidate; keep_bootcon enabled; retain OpenWrt base 0004 RTL8197F RX/TX mapping, v5.3.6 BUSY replay and v5.3.7 bounded IRQ diagnostics; v5.3.8 fixes RTL8197F LCR WLEN translation as a bit-field operation and installs raw DLL/DLM divisor callbacks so DLAB accesses cannot be remapped to RX/TX index 9; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

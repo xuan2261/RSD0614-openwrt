@@ -29,7 +29,7 @@ To eliminate serial rebuild churn while upholding `AGENTS.md` (unverified periph
 ## Verification boundary
 
 - v5.3.9 serial-only RAM-boot & interactive `ttyS0` shell on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.4.0 CI compile & 25/25 offline policy audit (`run 45036891876`): **PASS (COMPILE/AUDIT ONLY; HARDWARE RUNTIME NOT VERIFIED)**.
+- v5.4.1 CI compile & 27/27 offline policy audit (`run 45080096276` @ `961ee34`, `openwrt-realtek-rtl8197f-RSD0614-initramfs-kernel.bin`, `2,933,744` bytes / `0x2CC3F0`, SHA-256 `764aa670b9a0192a3a3a8d567f3830c5f9d2c7113e584757cc7805c110f82fe5`, `actions/cache@v4` builder/dl/toolchain caches populated) + warm local Docker build (`13m02s` on 2 vCPUs): **PASS (COMPILE/AUDIT ONLY)**.
 - v5.4.1 omnibus read-only qualification on physical RSD0614 V1.0 UART/runtime: **NOT YET VERIFIED**.
 - Disabled board peripherals (`ethernet` / `RTL8367RB`, `pcie0` / `RTL8814BR`, `wmac`, LEDs/buttons): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

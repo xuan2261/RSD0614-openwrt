@@ -16,11 +16,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "NOT YET VERIFIED FOR v5.3.9",
+  "openwrt_compile": "PASS on GitHub Actions run 45026415476 (commit 221aae12593f5b86aaa4d68e514ea82b1ddd1ade, sha256 e8199f3abde18b91c460df6eef265218226e33fb6bbad2a3fb09b1219ad65768, size 2928560, offline structural audit PASS 24/24, ELF _end 0x809e31d0)",
   "hardware_runtime": "NOT YET VERIFIED FOR v5.3.9",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.3.7 on RTL8197FH-VG: early0 outputs normally via dynamic 0xB8000000 SoC-ID check, while ttyS0 had silent TX and RX timeout storm (441/512, lsr=61, rbr=00, iir=cc->rx:cc, lcr=13) because 0004 forced non-VG tx_reg/rx_reg=9 (+0x24) and adjlcr=true onto RTL8197FH-VG (0x81970000, standard +0x00)",
-  "preflight": "NOT YET VERIFIED FOR v5.3.9",
+  "preflight": "PASS on GitHub Actions run 45026364712",
   "previous_build_result": "v5.3.8 run 36808678578: compile and offline structural audit passed, but retained static +0x24/adjlcr semantics incompatible with RTL8197FH-VG (0x81970000) and translated LCR after MMIO write"
 }

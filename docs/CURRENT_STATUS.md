@@ -42,5 +42,6 @@ Expected hardware validation on RSD0614 (`RTL8197FH-VG`):
 
 - v5.3.7 compile/offline audit & hardware diagnosis: PASS.
 - v5.3.8 compile/offline audit: PASS (superseded before hardware run due to VG/non-VG SoC-ID split).
-- v5.3.9 preflight/build/runtime: NOT YET VERIFIED.
+- v5.3.9 preflight (`45026364712`) & full compile/offline structural audit (`45026415476` at commit `221aae1`): PASS (`openwrt-realtek-rtl8197f-RSD0614-initramfs-kernel.bin`, `2,928,560` bytes, SHA-256 `e8199f3abde18b91c460df6eef265218226e33fb6bbad2a3fb09b1219ad65768`, ELF `_end = 0x809e31d0`, port input fingerprint `2d26aaa7acf7e2e185ebb8d85fc67d0ce81ad7a29efd3722f48f386e8bd620f0`).
+- v5.3.9 hardware runtime: NOT YET VERIFIED (`RAM_BOOT_AUTHORIZED=NO`).
 - Persistent flash: NO-GO.

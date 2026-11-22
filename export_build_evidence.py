@@ -28,6 +28,27 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     if 'while (1) {' in sheipatext:raise ValueError('Unbounded polling loop survived in compiled spi-sheipa.c')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
     if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
+    surveysrc=linux/'arch/mips/realtek/rsd0614_survey.c'
+    if not surveysrc.is_file():raise ValueError('Missing compiled omnibus survey source: '+str(surveysrc))
+    surveytext=surveysrc.read_text()
+    for token in (
+        'of_machine_is_compatible("rockspace,rsd0614")',
+        'proc_create("rsd0614_hw_survey", 0444, NULL, &rsd0614_hw_survey_fops)',
+        '.write = NULL,',
+        'proc_create("rsd0614_probe", 0600, NULL, &rsd0614_probe_fops)',
+        '(sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO',
+        '(cnr & RSD0614_SMI_PIN_MASK) != 0U',
+        '"skipped_pinmux_mismatch"',
+        'rsd0614_smi_write_reg(0x13C2U, 0x0249U)',
+        'orig_64 = sr_r32(REALTEK_SR_WLAN_EN);',
+        'sr_w32(orig_64, REALTEK_SR_WLAN_EN);',
+        'if ((ltssm & 0x1fU) == 0x11U)',
+        'RSD0614_PCIE0_EP_CFG',
+        'late_initcall(rsd0614_survey_init);',
+    ):
+        if token not in surveytext:raise ValueError('RSD0614 omnibus survey/probe guard missing from compiled source: '+token)
+    if 'while (1)' in surveytext:raise ValueError('Unbounded while (1) loop found in rsd0614_survey.c')
+    if 'smi_write_reg(0x1322' in surveytext:raise ValueError('Forbidden RTL8367 chip reset write found in rsd0614_survey.c')
     uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
     uart_required=(
         re.search(r'#define\s+UART_RX\s+0\b',uarttext) and
@@ -110,7 +131,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

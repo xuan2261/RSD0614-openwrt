@@ -78,7 +78,7 @@ class PackagingTests(unittest.TestCase):
  def test_30_bad_snapshot_injection_rejected(self):
   p=subprocess.run(['sh',str(ROOT/'apt-bootstrap.sh'),'--print-sources','bad;echo x','https'],capture_output=True,text=True);self.assertNotEqual(p.returncode,0);self.assertEqual(p.stdout,'')
  def test_31_shell_syntax(self):
-  for shell,name in [('sh','apt-bootstrap.sh'),('bash','build-rsd0614-initramfs.sh')]:
+  for shell,name in [('sh','apt-bootstrap.sh'),('bash','build-rsd0614-initramfs.sh'),('bash','build-local-linux.sh')]:
    p=subprocess.run([shell,'-n',str(ROOT/name)],capture_output=True,text=True);self.assertEqual(p.returncode,0,p.stderr)
  def test_32_signature_verification_not_disabled(self):
   t=(ROOT/'apt-bootstrap.sh').read_text()
@@ -99,9 +99,15 @@ class PackagingTests(unittest.TestCase):
  def test_35_source_commit_locks_preserved(self):
   lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['donor_commit'],profile.EXPECTED_DONOR_COMMIT);self.assertEqual(lock['base_commit'],'8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67');self.assertFalse(lock['ram_boot_authorized'])
  def test_36_build_files_have_no_router_transport_or_flash_commands(self):
-  for name in ('Build-RSD0614.ps1','build-rsd0614-initramfs.sh'):
+  for name in ('Build-RSD0614.ps1','build-rsd0614-initramfs.sh','build-local-linux.sh'):
    text=(ROOT/name).read_text()
    for token in ('tftp ','FLW ','AUTOBURN 1','ERASECHIP','ERASESECTOR','mtd write'):self.assertNotIn(token,text)
  def test_37_wrapper_preserves_logs_and_uses_dedicated_volume(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text();self.assertIn('--progress=plain',t);self.assertIn('Tee-Object -FilePath',t);self.assertIn('type=volume,source=$Volume,target=/work',t);self.assertNotIn('Remove-Item',t);self.assertNotIn('volume prune',t);self.assertIn('$BuilderOnly',t)
+ def test_38_seed_config_disables_cross_gdb_and_passes_validator(self):
+  seed=(ROOT/'seed-rsd0614-initramfs.config').read_text();self.assertIn('CONFIG_TOOLCHAINOPTS=y',seed);self.assertIn('# CONFIG_GDB is not set',seed);check_config.validate(seed)
+ def test_39_linux_wrapper_uses_ephemeral_volume_and_persistent_cache(self):
+  t=(ROOT/'build-local-linux.sh').read_text()
+  for token in ('set -euo pipefail','rsd0614-openwrt-builder:v5.1','builder.tar.zst','-e CACHE_DIR=/cache','BUILDER_IMAGE_ID=','PROJECT_COMMIT=','trap cleanup_volume EXIT'):self.assertIn(token,t)
+  self.assertNotIn('volume prune',t)
 if __name__=='__main__':unittest.main(verbosity=2)

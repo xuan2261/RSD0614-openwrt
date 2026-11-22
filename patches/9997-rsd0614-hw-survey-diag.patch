@@ -1,0 +1,892 @@
+diff --git a/arch/mips/realtek/Makefile b/arch/mips/realtek/Makefile
+index 502ddb8..368dd6b 100644
+--- a/arch/mips/realtek/Makefile
++++ b/arch/mips/realtek/Makefile
+@@ -4,3 +4,4 @@ obj-y	:= prom.o setup.o irq.o gpio.o
+ 
+ obj-$(CONFIG_SOC_RTL8197D) += rtl819x-timer.o
+ obj-$(CONFIG_SOC_RTL8196E) += rtl819x-timer.o
++obj-$(CONFIG_SOC_RTL8197F) += rsd0614_survey.o
+diff --git a/arch/mips/realtek/rsd0614_survey.c b/arch/mips/realtek/rsd0614_survey.c
+new file mode 100644
+index 0000000..621e43d
+--- /dev/null
++++ b/arch/mips/realtek/rsd0614_survey.c
+@@ -0,0 +1,877 @@
++// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
++/*
++ * Rock Space RSD0614 V1.0 omnibus read-only hardware qualification driver.
++ *
++ * Exposes two /proc interfaces (registered only on "rockspace,rsd0614"):
++ *   1. /proc/rsd0614_hw_survey (0444, .write = NULL):
++ *      Strictly passive KSEG1 register snapshot of SYSC, BOOTSTRAP decode,
++ *      MEMC, PIN_MUX_SEL0..18 + RGMII_PAD_CTRL, GICR, GPIO PABCD/PEFGH, and
++ *      CLKMANAGE BIT(11)-guarded CPU_IFACE + SWCORE port/MIB registers.
++ *      Performs zero hardware register writes.
++ *
++ *   2. /proc/rsd0614_probe (0600, never executed at boot):
++ *      Mutex-serialized one-shot diagnostic probes accepting ONLY exact
++ *      tokens "smi", "wmac", or "pcie0" (rejecting all other input with
++ *      -EINVAL):
++ *        - "smi": pinmux-guarded (PIN_MUX_SEL2[11:4]==0x66, PABCD_CNR[19:18]==0)
++ *          spinlock-serialized 2-wire SMI read on PABCD bits 18 (SCK) & 19 (SDA)
++ *          ONLY (never touching PEFGH or soft-reset 0x1322), unlocking 0x13c2=0x0249
++ *          and reading RTL8367 chip ID/version/mode, RGMII/extif, pbmp, and port
++ *          link status before restoring PABCD_DIR/PABCD_DAT bits 18..19.
++ *        - "wmac": keeps GIMR BIT(29) masked, saves SR+0x64, sets SR+0x64 |= 0x1f,
++ *          waits ~2 ms, reads WMAC +0x000/+0x004/+0x008/+0x0f0/+0x0fc/+0x100, and
++ *          restores SR+0x64.
++ *        - "pcie0": keeps GIMR BIT(21) masked, runs donor 40/25 MHz RC0 clock/PHY/
++ *          MDIO/PERST# bring-up, polls 0xB8B00728 (up to 21 iterations) for
++ *          (ltssm & 0x1f) == 0x11, and reads 0xB8B00000 + 0xB8B10000/0x08/0x2C
++ *          ONLY when (ltssm & 0x1f) == 0x11 (leaving 0xB8B10000 untouched if link
++ *          is down so an unclaimed downstream config read can never hang the bus).
++ */
++
++#ifndef RSD0614_SURVEY_SIM
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/errno.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++#include <linux/spinlock.h>
++#include <linux/string.h>
++#include <linux/types.h>
++#include <linux/uaccess.h>
++
++#include <asm/mach-realtek/realtek_mem.h>
++#endif
++
++#define RSD0614_SYSC_BASE		0xB8000000U
++#define RSD0614_PINMUX_BASE		0xB8000800U
++#define RSD0614_MEMC_BASE		0xB8001000U
++#define RSD0614_GICR_BASE		0xB8003000U
++#define RSD0614_GPIO_BASE		0xB8003500U
++#define RSD0614_CPU_IFACE_BASE		0xB8010000U
++#define RSD0614_WMAC_BASE		0xB8640000U
++#define RSD0614_PCIE0_RC_CFG		0xB8B00000U
++#define RSD0614_PCIE0_RC_EXT		0xB8B01000U
++#define RSD0614_PCIE0_EP_CFG		0xB8B10000U
++#define RSD0614_SWCORE_BASE		0xBB800000U
++#define RSD0614_SWCORE_MIB_BASE		0xBB801000U
++
++#define RSD0614_GIMR_REG		(RSD0614_GICR_BASE + 0x00U)
++#define RSD0614_GISR_REG		(RSD0614_GICR_BASE + 0x04U)
++
++#define RSD0614_PINMUX_SEL2_REG		(RSD0614_PINMUX_BASE + 0x08U)
++#define RSD0614_PINMUX_SMI_MASK		0x00000FF0U
++#define RSD0614_PINMUX_SMI_GPIO		0x00000660U
++
++#define RSD0614_PABCD_CNR_REG		(RSD0614_GPIO_BASE + 0x00U)
++#define RSD0614_PABCD_DIR_REG		(RSD0614_GPIO_BASE + 0x08U)
++#define RSD0614_PABCD_DAT_REG		(RSD0614_GPIO_BASE + 0x0CU)
++
++#define RSD0614_SMI_SCK_BIT		(1U << 18)
++#define RSD0614_SMI_SDA_BIT		(1U << 19)
++#define RSD0614_SMI_PIN_MASK		(RSD0614_SMI_SCK_BIT | RSD0614_SMI_SDA_BIT)
++#define RSD0614_SMI_CMD_WRITE		0xB8U
++#define RSD0614_SMI_CMD_READ		0xB9U
++#define RSD0614_SMI_ACK_RETRIES		5
++
++#ifndef RSD0614_SURVEY_SIM
++static inline u32 rsd0614_kseg1_r32(u32 addr)
++{
++	return __raw_readl((const volatile void __iomem *)(uintptr_t)addr);
++}
++
++static inline void rsd0614_kseg1_w32(u32 val, u32 addr)
++{
++	__raw_writel(val, (volatile void __iomem *)(uintptr_t)addr);
++}
++#endif
++
++static DEFINE_MUTEX(rsd0614_probe_lock);
++static DEFINE_SPINLOCK(rsd0614_smi_lock);
++
++struct rsd0614_smi_result {
++	char status[32];
++	u32 pinmux_sel2;
++	u32 pabcd_cnr;
++	u32 chip_num;
++	u32 chip_ver;
++	u32 chip_mode;
++	u32 dis;
++	u32 ext0_rgmxf;
++	u32 ext1_rgmxf;
++	u32 di_force0;
++	u32 di_force1;
++	u32 extif_1d11;
++	u32 cpu_mask_1219;
++	u32 cpu_ctrl_121a;
++	u32 pbmp[8];
++	u32 port_status[8];
++};
++
++struct rsd0614_wmac_result {
++	char status[32];
++	u32 orig_wlan_clk;
++	u32 gated_wlan_clk;
++	u32 restored_wlan_clk;
++	u32 bond_strap;
++	u32 reg_000;
++	u32 reg_004;
++	u32 reg_008;
++	u32 reg_0f0;
++	u32 reg_0fc;
++	u32 reg_100;
++	u32 cut_ver;
++	u32 hal_type_id;
++};
++
++struct rsd0614_pcie0_result {
++	char status[32];
++	unsigned int xtal_mhz;
++	unsigned int link_up;
++	u32 ltssm;
++	u32 rc_id;
++	u32 ep_id;
++	u32 ep_class;
++	u32 ep_subsys;
++};
++
++static struct rsd0614_smi_result g_smi_res = { .status = "not_run" };
++static struct rsd0614_wmac_result g_wmac_res = { .status = "not_run" };
++static struct rsd0614_pcie0_result g_pcie0_res = { .status = "not_run" };
++
++static unsigned int rsd0614_decode_cpu_mhz(u32 bootstrap)
++{
++	static const u16 clksel_mhz[16] = {
++		650, 700, 750, 800, 850, 900, 950, 1000,
++		1050, 1100, 1150, 1000, 1200, 600, 500, 400
++	};
++	static const u8 clkdiv[4] = { 1, 2, 2, 4 };
++	unsigned int sel = (bootstrap >> 15) & 0x0fU;
++	unsigned int div = (bootstrap >> 19) & 0x03U;
++
++	if (bootstrap & BIT(14))
++		return 200U / clkdiv[div];
++	return clksel_mhz[sel] / clkdiv[div];
++}
++
++static int rsd0614_hw_survey_show(struct seq_file *m, void *v)
++{
++	u32 soc_id, resv, bootstrap, bond_opt, clkmanage, enable_ip, wlan_clk, mdiorst;
++	unsigned int i, p;
++
++	(void)v;
++
++	soc_id = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x00U);
++	resv = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x04U);
++	bootstrap = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x08U);
++	bond_opt = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x0CU);
++	clkmanage = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x10U);
++	enable_ip = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x50U);
++	wlan_clk = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x64U);
++	mdiorst = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x100U);
++
++	seq_printf(m, "SYSC_SOC_ID=0x%08x\n", soc_id);
++	seq_printf(m, "SYSC_RESV=0x%08x\n", resv);
++	seq_printf(m, "SYSC_BOOTSTRAP=0x%08x\n", bootstrap);
++	seq_printf(m, "BOOTSTRAP_DECODE_XTAL_MHZ=%u\n",
++		   (bootstrap & BIT(24)) ? 40U : 25U);
++	seq_printf(m, "BOOTSTRAP_DECODE_CPU_FREQ_SEL=%u\n",
++		   (bootstrap >> 15) & 0x0fU);
++	seq_printf(m, "BOOTSTRAP_DECODE_CPU_DIV_SEL=%u\n",
++		   (bootstrap >> 19) & 0x03U);
++	seq_printf(m, "BOOTSTRAP_DECODE_CPU_MHZ=%u\n",
++		   rsd0614_decode_cpu_mhz(bootstrap));
++	seq_printf(m, "BOOTSTRAP_DECODE_DDR2_533=%u\n",
++		   (bootstrap & BIT(5)) ? 1U : 0U);
++	seq_printf(m, "BOOTSTRAP_DECODE_MII_MODE=%u\n",
++		   (bootstrap >> 30) & 0x03U);
++	seq_printf(m, "BOOTSTRAP_DECODE_BOOT_SEL=%u\n",
++		   bootstrap & 0x0fU);
++	seq_printf(m, "SYSC_BOND_OPTION=0x%08x\n", bond_opt);
++	seq_printf(m, "SYSC_BOND_CODE=0x%x\n", bond_opt & 0x0fU);
++	seq_printf(m, "SYSC_CLKMANAGE=0x%08x\n", clkmanage);
++	seq_printf(m, "SYSC_SWCORE_CLK_ACTIVE=%u\n",
++		   (clkmanage & BIT(11)) ? 1U : 0U);
++	seq_printf(m, "SYSC_ENABLE_IP=0x%08x\n", enable_ip);
++	seq_printf(m, "SYSC_WLAN_CLK=0x%08x\n", wlan_clk);
++	seq_printf(m, "SYSC_MDIORST=0x%08x\n", mdiorst);
++
++	seq_printf(m, "MEMC_DMR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_MEMC_BASE + 0x00U));
++	seq_printf(m, "MEMC_DCR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_MEMC_BASE + 0x04U));
++
++	for (i = 0; i <= 18; i++) {
++		seq_printf(m, "PINMUX_SEL%u=0x%08x\n", i,
++			   rsd0614_kseg1_r32(RSD0614_PINMUX_BASE + (i * 4U)));
++	}
++	seq_printf(m, "PINMUX_RGMII_PAD_CTRL=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_PINMUX_BASE + 0x50U));
++
++	seq_printf(m, "GICR_GIMR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x00U));
++	seq_printf(m, "GICR_GISR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x04U));
++	for (i = 0; i <= 3; i++) {
++		seq_printf(m, "GICR_IRR%u=0x%08x\n", i,
++			   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x08U + (i * 4U)));
++	}
++	seq_printf(m, "GICR_GIMR2=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x20U));
++	seq_printf(m, "GICR_GISR2=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x24U));
++	for (i = 0; i <= 3; i++) {
++		seq_printf(m, "GICR_IRR%u=0x%08x\n", i + 4U,
++			   rsd0614_kseg1_r32(RSD0614_GICR_BASE + 0x28U + (i * 4U)));
++	}
++
++	seq_printf(m, "GPIO_PABCD_CNR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x00U));
++	seq_printf(m, "GPIO_PABCD_PTYPE=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x04U));
++	seq_printf(m, "GPIO_PABCD_DIR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x08U));
++	seq_printf(m, "GPIO_PABCD_DAT=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x0CU));
++	seq_printf(m, "GPIO_PABCD_ISR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x10U));
++	seq_printf(m, "GPIO_PABCD_IMR0=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x14U));
++	seq_printf(m, "GPIO_PABCD_IMR1=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x18U));
++
++	seq_printf(m, "GPIO_PEFGH_CNR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x1CU));
++	seq_printf(m, "GPIO_PEFGH_PTYPE=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x20U));
++	seq_printf(m, "GPIO_PEFGH_DIR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x24U));
++	seq_printf(m, "GPIO_PEFGH_DAT=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x28U));
++	seq_printf(m, "GPIO_PEFGH_ISR=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x2CU));
++	seq_printf(m, "GPIO_PEFGH_IMR0=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x30U));
++	seq_printf(m, "GPIO_PEFGH_IMR1=0x%08x\n",
++		   rsd0614_kseg1_r32(RSD0614_GPIO_BASE + 0x34U));
++
++	if ((clkmanage & BIT(11)) != 0U) {
++		seq_printf(m, "CPU_IFACE_CPUICR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_CPU_IFACE_BASE + 0x000U));
++		seq_printf(m, "CPU_IFACE_CPUIIMR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_CPU_IFACE_BASE + 0x028U));
++		seq_printf(m, "CPU_IFACE_CPUIISR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_CPU_IFACE_BASE + 0x02CU));
++		seq_printf(m, "CPU_IFACE_DMA_CR0=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_CPU_IFACE_BASE + 0x03CU));
++		seq_printf(m, "CPU_IFACE_CPUICR1=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_CPU_IFACE_BASE + 0x0A4U));
++
++		seq_printf(m, "SWCORE_MACCR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4000U));
++		seq_printf(m, "SWCORE_MACCR1=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4058U));
++		seq_printf(m, "SWCORE_SSIR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4204U));
++		seq_printf(m, "SWCORE_MEMCR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4234U));
++		seq_printf(m, "SWCORE_MSCR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4410U));
++		seq_printf(m, "SWCORE_PITCR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4100U));
++		for (p = 0; p <= 8; p++) {
++			seq_printf(m, "SWCORE_PCRP%u=0x%08x\n", p,
++				   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4104U + (p * 4U)));
++		}
++		for (p = 0; p <= 8; p++) {
++			seq_printf(m, "SWCORE_PSRP%u=0x%08x\n", p,
++				   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x4128U + (p * 4U)));
++		}
++		seq_printf(m, "SWCORE_P0GMIICR=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x414CU));
++		seq_printf(m, "SWCORE_EXTPCR0=0x%08x\n",
++			   rsd0614_kseg1_r32(RSD0614_SWCORE_BASE + 0x5108U));
++
++		for (p = 0; p <= 8; p++) {
++			u32 rx_base = RSD0614_SWCORE_MIB_BASE + 0x100U + (p * 0x80U);
++			u32 tx_base = RSD0614_SWCORE_MIB_BASE + 0x800U + (p * 0x80U);
++
++			seq_printf(m,
++				   "SWCORE_MIB_P%u=in_oct_lo:0x%08x in_oct_hi:0x%08x in_ucast:%u in_mcast:%u in_bcast:%u out_oct_lo:0x%08x out_oct_hi:0x%08x out_ucast:%u out_mcast:%u out_bcast:%u\n",
++				   p,
++				   rsd0614_kseg1_r32(rx_base + 0x00U),
++				   rsd0614_kseg1_r32(rx_base + 0x04U),
++				   rsd0614_kseg1_r32(rx_base + 0x08U),
++				   rsd0614_kseg1_r32(rx_base + 0x3CU),
++				   rsd0614_kseg1_r32(rx_base + 0x40U),
++				   rsd0614_kseg1_r32(tx_base + 0x00U),
++				   rsd0614_kseg1_r32(tx_base + 0x04U),
++				   rsd0614_kseg1_r32(tx_base + 0x08U),
++				   rsd0614_kseg1_r32(tx_base + 0x0CU),
++				   rsd0614_kseg1_r32(tx_base + 0x10U));
++		}
++	} else {
++		seq_puts(m, "SWCORE_SKIPPED=clkmanage_bit11_off\n");
++	}
++
++	return 0;
++}
++
++static int rsd0614_hw_survey_open(struct inode *inode, struct file *file)
++{
++	(void)inode;
++	return single_open(file, rsd0614_hw_survey_show, NULL);
++}
++
++static const struct file_operations rsd0614_hw_survey_fops = {
++	.owner = THIS_MODULE,
++	.open = rsd0614_hw_survey_open,
++	.read = seq_read,
++	.llseek = seq_lseek,
++	.release = single_release,
++	.write = NULL,
++};
++
++/* --- Pinmux-guarded 2-wire SMI helpers (PABCD bits 18..19 ONLY) ---------- */
++
++static inline void rsd0614_smi_set_dir(u32 bit, bool output)
++{
++	u32 dir = rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG);
++
++	if (output)
++		dir |= bit;
++	else
++		dir &= ~bit;
++	rsd0614_kseg1_w32(dir, RSD0614_PABCD_DIR_REG);
++}
++
++static inline void rsd0614_smi_set_dat(u32 bit, bool high)
++{
++	u32 dat = rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG);
++
++	if (high)
++		dat |= bit;
++	else
++		dat &= ~bit;
++	rsd0614_kseg1_w32(dat, RSD0614_PABCD_DAT_REG);
++}
++
++static inline u32 rsd0614_smi_get_sda(void)
++{
++	return (rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG) & RSD0614_SMI_SDA_BIT) ? 1U : 0U;
++}
++
++static void rsd0614_smi_start(void)
++{
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dir(RSD0614_SMI_SCK_BIT | RSD0614_SMI_SDA_BIT, true);
++	udelay(2);
++
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	udelay(2);
++
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
++}
++
++static void rsd0614_smi_stop(void)
++{
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	udelay(2);
++	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++
++	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, false);
++	rsd0614_smi_set_dir(RSD0614_SMI_SCK_BIT, false);
++}
++
++static void rsd0614_smi_write_bits(u32 data, unsigned int len)
++{
++	unsigned int i;
++
++	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, true);
++	for (i = len; i > 0; i--) {
++		udelay(2);
++		rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT,
++				    (data & (1U << (i - 1U))) != 0U);
++		udelay(2);
++		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++		udelay(2);
++		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	}
++}
++
++static void rsd0614_smi_read_bits(unsigned int len, u32 *data)
++{
++	unsigned int i;
++
++	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, false);
++	*data = 0;
++	for (i = len; i > 0; i--) {
++		u32 bit;
++
++		udelay(2);
++		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++		udelay(2);
++		bit = rsd0614_smi_get_sda();
++		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++		*data |= (bit << (i - 1U));
++	}
++	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
++	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, true);
++}
++
++static int rsd0614_smi_wait_ack(void)
++{
++	int retry;
++
++	for (retry = 0; retry <= RSD0614_SMI_ACK_RETRIES; retry++) {
++		u32 ack = 1;
++
++		rsd0614_smi_read_bits(1, &ack);
++		if (ack == 0)
++			return 0;
++	}
++	return -ETIMEDOUT;
++}
++
++static int rsd0614_smi_write_byte(u8 byte)
++{
++	rsd0614_smi_write_bits(byte, 8);
++	return rsd0614_smi_wait_ack();
++}
++
++static int rsd0614_smi_write_reg(u16 addr, u16 val)
++{
++	unsigned long flags;
++	int ret;
++
++	spin_lock_irqsave(&rsd0614_smi_lock, flags);
++	rsd0614_smi_start();
++	ret = rsd0614_smi_write_byte(RSD0614_SMI_CMD_WRITE);
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)(addr & 0xffU));
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)((addr >> 8) & 0xffU));
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)(val & 0xffU));
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)((val >> 8) & 0xffU));
++out:
++	rsd0614_smi_stop();
++	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++	return ret;
++}
++
++static int rsd0614_smi_read_reg(u16 addr, u32 *val)
++{
++	unsigned long flags;
++	u32 lo = 0, hi = 0;
++	int ret;
++
++	spin_lock_irqsave(&rsd0614_smi_lock, flags);
++	rsd0614_smi_start();
++	ret = rsd0614_smi_write_byte(RSD0614_SMI_CMD_READ);
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)(addr & 0xffU));
++	if (ret)
++		goto out;
++	ret = rsd0614_smi_write_byte((u8)((addr >> 8) & 0xffU));
++	if (ret)
++		goto out;
++	rsd0614_smi_read_bits(8, &lo);
++	rsd0614_smi_write_bits(0x00U, 1);
++	rsd0614_smi_read_bits(8, &hi);
++	rsd0614_smi_write_bits(0x01U, 1);
++	*val = (lo & 0xffU) | ((hi & 0xffU) << 8);
++out:
++	rsd0614_smi_stop();
++	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++	return ret;
++}
++
++static void rsd0614_run_probe_smi(void)
++{
++	unsigned long flags;
++	u32 sel2, cnr, orig_dir, orig_dat;
++	unsigned int p;
++	int ret;
++
++	memset(&g_smi_res, 0, sizeof(g_smi_res));
++	sel2 = rsd0614_kseg1_r32(RSD0614_PINMUX_SEL2_REG);
++	cnr = rsd0614_kseg1_r32(RSD0614_PABCD_CNR_REG);
++	g_smi_res.pinmux_sel2 = sel2;
++	g_smi_res.pabcd_cnr = cnr;
++
++	if ((sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO ||
++	    (cnr & RSD0614_SMI_PIN_MASK) != 0U) {
++		scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "skipped_pinmux_mismatch");
++		pr_info("rsd0614-probe: smi skipped_pinmux_mismatch (sel2=0x%08x pabcd_cnr=0x%08x)\n",
++			sel2, cnr);
++		return;
++	}
++
++	orig_dir = rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG);
++	orig_dat = rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG);
++
++	ret = rsd0614_smi_write_reg(0x13C2U, 0x0249U);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1300U, &g_smi_res.chip_num);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1301U, &g_smi_res.chip_ver);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1302U, &g_smi_res.chip_mode);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1305U, &g_smi_res.dis);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1306U, &g_smi_res.ext0_rgmxf);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1307U, &g_smi_res.ext1_rgmxf);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1310U, &g_smi_res.di_force0);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1311U, &g_smi_res.di_force1);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1D11U, &g_smi_res.extif_1d11);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x1219U, &g_smi_res.cpu_mask_1219);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(0x121AU, &g_smi_res.cpu_ctrl_121a);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_smi_read_reg((u16)(0x08A2U + p), &g_smi_res.pbmp[p]);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_smi_read_reg((u16)(0x1352U + p), &g_smi_res.port_status[p]);
++
++	spin_lock_irqsave(&rsd0614_smi_lock, flags);
++	rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG) & ~RSD0614_SMI_PIN_MASK) |
++			  (orig_dat & RSD0614_SMI_PIN_MASK),
++			  RSD0614_PABCD_DAT_REG);
++	rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG) & ~RSD0614_SMI_PIN_MASK) |
++			  (orig_dir & RSD0614_SMI_PIN_MASK),
++			  RSD0614_PABCD_DIR_REG);
++	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++
++	if (ret) {
++		scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "ack_timeout");
++		pr_warn("rsd0614-probe: smi ack_timeout (err=%d)\n", ret);
++		return;
++	}
++
++	scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "ok");
++	pr_info("rsd0614-probe: smi ok num=0x%04x ver=0x%04x mode=0x%04x dis=0x%04x di1=0x%04x extif=0x%04x cpu_mask=0x%04x\n",
++		g_smi_res.chip_num, g_smi_res.chip_ver, g_smi_res.chip_mode,
++		g_smi_res.dis, g_smi_res.di_force1, g_smi_res.extif_1d11,
++		g_smi_res.cpu_mask_1219);
++}
++
++static void rsd0614_run_probe_wmac(void)
++{
++	u32 gimr, orig_64;
++
++	memset(&g_wmac_res, 0, sizeof(g_wmac_res));
++	if (!_sys_membase) {
++		scnprintf(g_wmac_res.status, sizeof(g_wmac_res.status), "%s", "no_sysc_map");
++		return;
++	}
++
++	/* Keep GIMR BIT(29) masked throughout the probe. */
++	gimr = rsd0614_kseg1_r32(RSD0614_GIMR_REG);
++	if (gimr & BIT(29))
++		rsd0614_kseg1_w32(gimr & ~BIT(29), RSD0614_GIMR_REG);
++
++	orig_64 = sr_r32(REALTEK_SR_WLAN_EN);
++	g_wmac_res.orig_wlan_clk = orig_64;
++
++	sr_w32(orig_64 | REALTEK_SR_WLAN_EN_ALL, REALTEK_SR_WLAN_EN);
++	usleep_range(1500, 2500);
++	g_wmac_res.gated_wlan_clk = sr_r32(REALTEK_SR_WLAN_EN);
++
++	g_wmac_res.bond_strap = sr_r32(0x0CU) & 0x0fU;
++	g_wmac_res.reg_000 = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x000U);
++	g_wmac_res.reg_004 = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x004U);
++	g_wmac_res.reg_008 = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x008U);
++	g_wmac_res.reg_0f0 = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x0F0U);
++	g_wmac_res.reg_0fc = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x0FCU);
++	g_wmac_res.reg_100 = rsd0614_kseg1_r32(RSD0614_WMAC_BASE + 0x100U);
++	g_wmac_res.cut_ver = (g_wmac_res.reg_0f0 >> 12) & 0x0fU;
++	g_wmac_res.hal_type_id = g_wmac_res.reg_0fc & 0xffU;
++
++	sr_w32(orig_64, REALTEK_SR_WLAN_EN);
++	g_wmac_res.restored_wlan_clk = sr_r32(REALTEK_SR_WLAN_EN);
++	rsd0614_kseg1_w32(BIT(29), RSD0614_GISR_REG);
++
++	if (g_wmac_res.reg_000 == 0xffffffffU && g_wmac_res.reg_004 == 0xffffffffU &&
++	    g_wmac_res.reg_008 == 0xffffffffU && g_wmac_res.reg_100 == 0xffffffffU)
++		scnprintf(g_wmac_res.status, sizeof(g_wmac_res.status), "%s", "dead_bus_all_ones");
++	else if (!g_wmac_res.reg_000 && !g_wmac_res.reg_004 &&
++		 !g_wmac_res.reg_008 && !g_wmac_res.reg_100)
++		scnprintf(g_wmac_res.status, sizeof(g_wmac_res.status), "%s", "dead_bus_all_zero");
++	else
++		scnprintf(g_wmac_res.status, sizeof(g_wmac_res.status), "%s", "ok");
++
++	pr_info("rsd0614-probe: wmac %s sr64=0x%08x->0x%08x->0x%08x +0x000=0x%08x +0x0f0=0x%08x cut=%u hal_type=%u strap=%u\n",
++		g_wmac_res.status, g_wmac_res.orig_wlan_clk,
++		g_wmac_res.gated_wlan_clk, g_wmac_res.restored_wlan_clk,
++		g_wmac_res.reg_000, g_wmac_res.reg_0f0,
++		g_wmac_res.cut_ver, g_wmac_res.hal_type_id,
++		g_wmac_res.bond_strap);
++}
++
++static void rsd0614_pcie0_mdio_write(u32 reg, u32 data)
++{
++	u32 val = ((reg & 0x1fU) << 8) | ((data & 0xffffU) << 16) | BIT(0);
++
++	rsd0614_kseg1_w32(val, RSD0614_PCIE0_RC_EXT + 0x00U);
++	usleep_range(2000, 3000);
++}
++
++static void rsd0614_pcie0_phy_reset(void)
++{
++	rsd0614_kseg1_w32(0x01U, RSD0614_PCIE0_RC_EXT + 0x08U);
++	rsd0614_kseg1_w32(0x81U, RSD0614_PCIE0_RC_EXT + 0x08U);
++}
++
++static void rsd0614_run_probe_pcie0(void)
++{
++	u32 gimr, val, ltssm = 0;
++	int is40, i;
++
++	memset(&g_pcie0_res, 0, sizeof(g_pcie0_res));
++	if (!_sys_membase) {
++		scnprintf(g_pcie0_res.status, sizeof(g_pcie0_res.status), "%s", "no_sysc_map");
++		return;
++	}
++
++	/* Keep GIMR BIT(21) masked throughout the probe. */
++	gimr = rsd0614_kseg1_r32(RSD0614_GIMR_REG);
++	if (gimr & BIT(21))
++		rsd0614_kseg1_w32(gimr & ~BIT(21), RSD0614_GIMR_REG);
++
++	is40 = !!(sr_r32(REALTEK_SR_REG_BOOTSTRAP) & REALTEK_SR_BS_40MHZ);
++	g_pcie0_res.xtal_mhz = is40 ? 40U : 25U;
++
++	val = sr_r32(REALTEK_SR_CLKMANAGE);
++	val |= BIT(12) | BIT(13) | BIT(18);
++	sr_w32(val, REALTEK_SR_CLKMANAGE);
++	val = sr_r32(REALTEK_SR_CLKMANAGE);
++	val |= BIT(14);
++	sr_w32(val, REALTEK_SR_CLKMANAGE);
++	msleep(10);
++
++	sr_w32(0x8U, REALTEK_SR_MDIORST);
++	sr_w32(0x9U, REALTEK_SR_MDIORST);
++	sr_w32(0xBU, REALTEK_SR_MDIORST);
++	msleep(10);
++
++	rsd0614_pcie0_phy_reset();
++	msleep(10);
++
++	if (is40) {
++		rsd0614_pcie0_mdio_write(0x0fU, 0x12f6U);
++		rsd0614_pcie0_mdio_write(0x00U, 0x0071U);
++		rsd0614_pcie0_mdio_write(0x06U, 0x1ac1U);
++	} else {
++		rsd0614_pcie0_mdio_write(0x00U, 0x0071U);
++		rsd0614_pcie0_mdio_write(0x06U, 0x18c1U);
++	}
++	msleep(10);
++
++	rsd0614_pcie0_phy_reset();
++
++	val = sr_r32(REALTEK_SR_PCIE_PHY0);
++	sr_w32(val & ~BIT(1), REALTEK_SR_PCIE_PHY0);
++	msleep(300);
++	val = sr_r32(REALTEK_SR_PCIE_PHY0);
++	sr_w32(val | BIT(1), REALTEK_SR_PCIE_PHY0);
++	msleep(10);
++
++	for (i = 0; i < 21; i++) {
++		ltssm = rsd0614_kseg1_r32(RSD0614_PCIE0_RC_CFG + 0x728U);
++		if ((ltssm & 0x1fU) == 0x11U) {
++			g_pcie0_res.link_up = 1U;
++			break;
++		}
++		if (i < 20)
++			msleep(100);
++	}
++	g_pcie0_res.ltssm = ltssm;
++
++	if ((ltssm & 0x1fU) == 0x11U) {
++		g_pcie0_res.rc_id = rsd0614_kseg1_r32(RSD0614_PCIE0_RC_CFG + 0x000U);
++		g_pcie0_res.ep_id = rsd0614_kseg1_r32(RSD0614_PCIE0_EP_CFG + 0x000U);
++		g_pcie0_res.ep_class = rsd0614_kseg1_r32(RSD0614_PCIE0_EP_CFG + 0x008U);
++		g_pcie0_res.ep_subsys = rsd0614_kseg1_r32(RSD0614_PCIE0_EP_CFG + 0x02CU);
++		scnprintf(g_pcie0_res.status, sizeof(g_pcie0_res.status), "%s", "link_up");
++		pr_info("rsd0614-probe: pcie0 link_up xtal=%uMHz ltssm=0x%08x rc_id=0x%08x ep_id=0x%08x ep_class=0x%08x ep_subsys=0x%08x\n",
++			g_pcie0_res.xtal_mhz, g_pcie0_res.ltssm,
++			g_pcie0_res.rc_id, g_pcie0_res.ep_id,
++			g_pcie0_res.ep_class, g_pcie0_res.ep_subsys);
++	} else {
++		/* Leave 0xB8B10000 completely untouched when LTSSM != 0x11. */
++		scnprintf(g_pcie0_res.status, sizeof(g_pcie0_res.status), "%s", "link_down");
++		pr_warn("rsd0614-probe: pcie0 link_down xtal=%uMHz ltssm=0x%08x (0xB8B10000 untouched)\n",
++			g_pcie0_res.xtal_mhz, g_pcie0_res.ltssm);
++	}
++	rsd0614_kseg1_w32(BIT(21), RSD0614_GISR_REG);
++}
++
++static int rsd0614_probe_show(struct seq_file *m, void *v)
++{
++	unsigned int p;
++
++	(void)v;
++	mutex_lock(&rsd0614_probe_lock);
++
++	seq_printf(m, "SMI_STATUS=%s\n", g_smi_res.status);
++	if (strcmp(g_smi_res.status, "not_run") != 0) {
++		seq_printf(m, "SMI_PINMUX_SEL2=0x%08x\n", g_smi_res.pinmux_sel2);
++		seq_printf(m, "SMI_PABCD_CNR=0x%08x\n", g_smi_res.pabcd_cnr);
++	}
++	if (strcmp(g_smi_res.status, "ok") == 0) {
++		seq_printf(m, "SMI_CHIP_NUM=0x%04x\n", g_smi_res.chip_num);
++		seq_printf(m, "SMI_CHIP_VER=0x%04x\n", g_smi_res.chip_ver);
++		seq_printf(m, "SMI_CHIP_MODE=0x%04x\n", g_smi_res.chip_mode);
++		seq_printf(m, "SMI_DIS_1305=0x%04x\n", g_smi_res.dis);
++		seq_printf(m, "SMI_EXT0_RGMXF_1306=0x%04x\n", g_smi_res.ext0_rgmxf);
++		seq_printf(m, "SMI_EXT1_RGMXF_1307=0x%04x\n", g_smi_res.ext1_rgmxf);
++		seq_printf(m, "SMI_DI_FORCE0_1310=0x%04x\n", g_smi_res.di_force0);
++		seq_printf(m, "SMI_DI_FORCE1_1311=0x%04x\n", g_smi_res.di_force1);
++		seq_printf(m, "SMI_EXTIF_1D11=0x%04x\n", g_smi_res.extif_1d11);
++		seq_printf(m, "SMI_CPU_MASK_1219=0x%04x\n", g_smi_res.cpu_mask_1219);
++		seq_printf(m, "SMI_CPU_CTRL_121A=0x%04x\n", g_smi_res.cpu_ctrl_121a);
++		for (p = 0; p < 8; p++)
++			seq_printf(m, "SMI_PBMP_P%u=0x%04x\n", p, g_smi_res.pbmp[p]);
++		for (p = 0; p < 8; p++)
++			seq_printf(m, "SMI_PORT_STATUS_P%u=0x%04x\n",
++				   p, g_smi_res.port_status[p]);
++	}
++
++	seq_printf(m, "WMAC_STATUS=%s\n", g_wmac_res.status);
++	if (strcmp(g_wmac_res.status, "not_run") != 0 &&
++	    strcmp(g_wmac_res.status, "no_sysc_map") != 0) {
++		seq_printf(m, "WMAC_SR64_ORIG=0x%08x\n", g_wmac_res.orig_wlan_clk);
++		seq_printf(m, "WMAC_SR64_GATED=0x%08x\n", g_wmac_res.gated_wlan_clk);
++		seq_printf(m, "WMAC_SR64_RESTORED=0x%08x\n", g_wmac_res.restored_wlan_clk);
++		seq_printf(m, "WMAC_BOND_STRAP=%u\n", g_wmac_res.bond_strap);
++		seq_printf(m, "WMAC_REG_000=0x%08x\n", g_wmac_res.reg_000);
++		seq_printf(m, "WMAC_REG_004=0x%08x\n", g_wmac_res.reg_004);
++		seq_printf(m, "WMAC_REG_008=0x%08x\n", g_wmac_res.reg_008);
++		seq_printf(m, "WMAC_REG_0F0=0x%08x\n", g_wmac_res.reg_0f0);
++		seq_printf(m, "WMAC_REG_0FC=0x%08x\n", g_wmac_res.reg_0fc);
++		seq_printf(m, "WMAC_REG_100=0x%08x\n", g_wmac_res.reg_100);
++		seq_printf(m, "WMAC_CUT_VER=%u\n", g_wmac_res.cut_ver);
++		seq_printf(m, "WMAC_HAL_TYPE_ID=%u\n", g_wmac_res.hal_type_id);
++	}
++
++	seq_printf(m, "PCIE0_STATUS=%s\n", g_pcie0_res.status);
++	if (strcmp(g_pcie0_res.status, "not_run") != 0 &&
++	    strcmp(g_pcie0_res.status, "no_sysc_map") != 0) {
++		seq_printf(m, "PCIE0_XTAL_MHZ=%u\n", g_pcie0_res.xtal_mhz);
++		seq_printf(m, "PCIE0_LINK_UP=%u\n", g_pcie0_res.link_up);
++		seq_printf(m, "PCIE0_LTSSM=0x%08x\n", g_pcie0_res.ltssm);
++		if (g_pcie0_res.link_up) {
++			seq_printf(m, "PCIE0_RC_ID=0x%08x\n", g_pcie0_res.rc_id);
++			seq_printf(m, "PCIE0_EP_ID=0x%08x\n", g_pcie0_res.ep_id);
++			seq_printf(m, "PCIE0_EP_VENDOR=0x%04x\n",
++				   g_pcie0_res.ep_id & 0xffffU);
++			seq_printf(m, "PCIE0_EP_DEVICE=0x%04x\n",
++				   (g_pcie0_res.ep_id >> 16) & 0xffffU);
++			seq_printf(m, "PCIE0_EP_CLASS=0x%08x\n", g_pcie0_res.ep_class);
++			seq_printf(m, "PCIE0_EP_SUBSYS=0x%08x\n", g_pcie0_res.ep_subsys);
++		}
++	}
++
++	mutex_unlock(&rsd0614_probe_lock);
++	return 0;
++}
++
++static int rsd0614_probe_open(struct inode *inode, struct file *file)
++{
++	(void)inode;
++	return single_open(file, rsd0614_probe_show, NULL);
++}
++
++static ssize_t rsd0614_probe_write(struct file *file, const char __user *ubuf,
++				   size_t count, loff_t *ppos)
++{
++	char kbuf[32];
++	char *cmd;
++
++	(void)file;
++	(void)ppos;
++	if (count == 0 || count >= sizeof(kbuf))
++		return -EINVAL;
++	if (copy_from_user(kbuf, ubuf, count))
++		return -EFAULT;
++	kbuf[count] = '\0';
++	cmd = strim(kbuf);
++
++	mutex_lock(&rsd0614_probe_lock);
++	if (strcmp(cmd, "smi") == 0) {
++		rsd0614_run_probe_smi();
++	} else if (strcmp(cmd, "wmac") == 0) {
++		rsd0614_run_probe_wmac();
++	} else if (strcmp(cmd, "pcie0") == 0) {
++		rsd0614_run_probe_pcie0();
++	} else {
++		mutex_unlock(&rsd0614_probe_lock);
++		return -EINVAL;
++	}
++	mutex_unlock(&rsd0614_probe_lock);
++
++	return (ssize_t)count;
++}
++
++static const struct file_operations rsd0614_probe_fops = {
++	.owner = THIS_MODULE,
++	.open = rsd0614_probe_open,
++	.read = seq_read,
++	.write = rsd0614_probe_write,
++	.llseek = seq_lseek,
++	.release = single_release,
++};
++
++static int __init rsd0614_survey_init(void)
++{
++	if (!of_machine_is_compatible("rockspace,rsd0614"))
++		return 0;
++
++	if (!proc_create("rsd0614_hw_survey", 0444, NULL, &rsd0614_hw_survey_fops))
++		pr_warn("rsd0614-survey: failed to create /proc/rsd0614_hw_survey\n");
++	if (!proc_create("rsd0614_probe", 0600, NULL, &rsd0614_probe_fops))
++		pr_warn("rsd0614-survey: failed to create /proc/rsd0614_probe\n");
++
++	pr_info("rsd0614-survey: /proc/rsd0614_hw_survey (0444) and /proc/rsd0614_probe (0600) ready\n");
++	return 0;
++}
++late_initcall(rsd0614_survey_init);

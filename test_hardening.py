@@ -23,6 +23,299 @@ def build_patched_dw8250():
                 raise RuntimeError(f'Patch {patch.name} failed:\n{r.stdout}{r.stderr}')
         return dst.read_bytes()
 
+REALTEK_MAKEFILE_FIXTURE=(
+    '\n\nobj-y\t:= prom.o setup.o irq.o gpio.o\n\n'
+    'obj-$(CONFIG_SOC_RTL8197D) += rtl819x-timer.o\n'
+    'obj-$(CONFIG_SOC_RTL8196E) += rtl819x-timer.o\n'
+)
+
+def build_patched_survey():
+    with tempfile.TemporaryDirectory() as td:
+        root=Path(td);mk=root/'arch/mips/realtek/Makefile'
+        mk.parent.mkdir(parents=True,exist_ok=True);mk.write_text(REALTEK_MAKEFILE_FIXTURE)
+        patch=ROOT/'patches'/hs.SURVEY_PATCH_NAME
+        r=subprocess.run(['patch','--batch','--fuzz=0','-p1','-i',str(patch)],cwd=td,text=True,capture_output=True)
+        if r.returncode!=0:
+            raise RuntimeError(f'Patch {patch.name} failed:\n{r.stdout}{r.stderr}')
+        return mk.read_text(),(root/'arch/mips/realtek/rsd0614_survey.c').read_bytes()
+
+SURVEY_SIM_C = r"""#define RSD0614_SURVEY_SIM 1
+#include <assert.h>
+#include <ctype.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+
+typedef uint8_t u8;
+typedef uint16_t u16;
+typedef uint32_t u32;
+typedef int64_t loff_t;
+typedef long ssize_t;
+
+#define __init
+#define __user
+#define THIS_MODULE ((void *)0)
+#define BIT(nr) (1UL << (nr))
+#define EINVAL 22
+#define EFAULT 14
+#define ETIMEDOUT 110
+
+#define REALTEK_SR_REG_ID 0x00
+#define REALTEK_SR_REG_BOOTSTRAP 0x08
+#define REALTEK_SR_CLKMANAGE 0x10
+#define REALTEK_SR_PCIE_PHY0 0x50
+#define REALTEK_SR_WLAN_EN 0x64
+#define REALTEK_SR_WLAN_EN_ALL 0x1f
+#define REALTEK_SR_MDIORST 0x100
+#define REALTEK_SR_BS_40MHZ BIT(24)
+
+static void *_sys_membase = (void *)1;
+
+struct mutex { int locked; };
+#define DEFINE_MUTEX(name) struct mutex name = { 0 }
+static inline void mutex_lock(struct mutex *m) { assert(!m->locked); m->locked = 1; }
+static inline void mutex_unlock(struct mutex *m) { assert(m->locked); m->locked = 0; }
+
+typedef struct { int dummy; } spinlock_t;
+#define DEFINE_SPINLOCK(name) spinlock_t name = { 0 }
+#define spin_lock_irqsave(l, f) do { (void)(l); (f) = 0; } while (0)
+#define spin_unlock_irqrestore(l, f) do { (void)(l); (void)(f); } while (0)
+
+static inline void udelay(unsigned long u) { (void)u; }
+static inline void msleep(unsigned int m) { (void)m; }
+static inline void usleep_range(unsigned long a, unsigned long b) { (void)a; (void)b; }
+static inline void pr_info(const char *fmt, ...) { (void)fmt; }
+static inline void pr_warn(const char *fmt, ...) { (void)fmt; }
+
+static inline int scnprintf(char *buf, size_t size, const char *fmt, ...) {
+    va_list ap;
+    int n;
+    va_start(ap, fmt);
+    n = vsnprintf(buf, size, fmt, ap);
+    va_end(ap);
+    return (n < 0) ? 0 : ((size_t)n >= size ? (int)(size - 1) : n);
+}
+
+static inline char *strim(char *s) {
+    size_t size = strlen(s);
+    char *end;
+    if (!size) return s;
+    end = s + size - 1;
+    while (end >= s && isspace((unsigned char)*end)) end--;
+    *(end + 1) = '\0';
+    while (*s && isspace((unsigned char)*s)) s++;
+    return s;
+}
+
+struct seq_file { char buf[32768]; size_t len; };
+static inline void seq_printf(struct seq_file *m, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    m->len += (size_t)vsnprintf(m->buf + m->len, sizeof(m->buf) - m->len, fmt, ap);
+    va_end(ap);
+}
+static inline void seq_puts(struct seq_file *m, const char *s) {
+    seq_printf(m, "%s", s);
+}
+
+struct inode { int dummy; };
+struct file { void *private_data; };
+struct proc_dir_entry { const char *name; int mode; const void *fops; };
+struct file_operations {
+    void *owner;
+    int (*open)(struct inode *, struct file *);
+    ssize_t (*read)(struct file *, char *, size_t, loff_t *);
+    ssize_t (*write)(struct file *, const char *, size_t, loff_t *);
+    loff_t (*llseek)(struct file *, loff_t, int);
+    int (*release)(struct inode *, struct file *);
+};
+static ssize_t seq_read(struct file *f, char *b, size_t c, loff_t *p) { (void)f; (void)b; (void)c; (void)p; return 0; }
+static loff_t seq_lseek(struct file *f, loff_t o, int w) { (void)f; (void)o; (void)w; return 0; }
+static int single_release(struct inode *i, struct file *f) { (void)i; (void)f; return 0; }
+static int single_open(struct file *f, int (*show)(struct seq_file *, void *), void *d) { (void)f; (void)show; (void)d; return 0; }
+static inline unsigned long copy_from_user(void *to, const void *from, unsigned long n) { memcpy(to, from, n); return 0; }
+
+static bool g_is_rsd0614 = true;
+static inline bool of_machine_is_compatible(const char *c) {
+    return g_is_rsd0614 && strcmp(c, "rockspace,rsd0614") == 0;
+}
+
+static struct proc_dir_entry g_proc_entries[4];
+static int g_proc_count;
+static inline struct proc_dir_entry *proc_create(const char *name, int mode, void *parent, const struct file_operations *fops) {
+    (void)parent;
+    g_proc_entries[g_proc_count].name = name;
+    g_proc_entries[g_proc_count].mode = mode;
+    g_proc_entries[g_proc_count].fops = fops;
+    return &g_proc_entries[g_proc_count++];
+}
+#define late_initcall(fn)
+
+/* Simulated MMIO state */
+static u32 g_sysc[0x80];
+static u32 g_pinmux[0x20];
+static u32 g_memc[0x08];
+static u32 g_gicr[0x10];
+static u32 g_gpio[0x10];
+static u32 g_cpu_iface[0x40];
+static u32 g_wmac[0x80];
+static u32 g_pcie_rc[0x200];
+static u32 g_pcie_ext[0x10];
+static u32 g_pcie_ep[0x20];
+static int g_write_count;
+static int g_swcore_reads;
+static int g_pefgh_writes;
+static int g_ep_cfg_reads;
+static int g_mdio_0f_writes;
+
+static u32 rsd0614_kseg1_r32(u32 addr) {
+    if (addr >= 0xB8000000U && addr < 0xB8000200U) return g_sysc[(addr - 0xB8000000U) >> 2];
+    if (addr >= 0xB8000800U && addr < 0xB8000880U) return g_pinmux[(addr - 0xB8000800U) >> 2];
+    if (addr >= 0xB8001000U && addr < 0xB8001020U) return g_memc[(addr - 0xB8001000U) >> 2];
+    if (addr >= 0xB8003000U && addr < 0xB8003040U) return g_gicr[(addr - 0xB8003000U) >> 2];
+    if (addr >= 0xB8003500U && addr < 0xB8003540U) {
+        u32 v = g_gpio[(addr - 0xB8003500U) >> 2];
+        /* Simulate SMI ACK=0 when SDA (bit 19) is switched to input */
+        if (addr == 0xB800350CU && !(g_gpio[0x08 >> 2] & (1U << 19)))
+            return v & ~(1U << 19);
+        return v;
+    }
+    if (addr >= 0xB8010000U && addr < 0xB8010100U) { g_swcore_reads++; return g_cpu_iface[(addr - 0xB8010000U) >> 2]; }
+    if (addr >= 0xB8640000U && addr < 0xB8640200U) return g_wmac[(addr - 0xB8640000U) >> 2];
+    if (addr >= 0xB8B00000U && addr < 0xB8B00800U) return g_pcie_rc[(addr - 0xB8B00000U) >> 2];
+    if (addr >= 0xB8B01000U && addr < 0xB8B01040U) return g_pcie_ext[(addr - 0xB8B01000U) >> 2];
+    if (addr >= 0xB8B10000U && addr < 0xB8B10080U) { g_ep_cfg_reads++; return g_pcie_ep[(addr - 0xB8B10000U) >> 2]; }
+    if (addr >= 0xBB800000U && addr < 0xBB806000U) { g_swcore_reads++; return 0x12345678U; }
+    assert(!"unexpected KSEG1 read address");
+    return 0;
+}
+
+static void rsd0614_kseg1_w32(u32 val, u32 addr) {
+    g_write_count++;
+    if (addr >= 0xB8000000U && addr < 0xB8000200U) { g_sysc[(addr - 0xB8000000U) >> 2] = val; return; }
+    if (addr >= 0xB8003000U && addr < 0xB8003040U) { g_gicr[(addr - 0xB8003000U) >> 2] = val; return; }
+    if (addr >= 0xB8003500U && addr < 0xB8003540U) {
+        if (addr >= 0xB800351CU) g_pefgh_writes++;
+        g_gpio[(addr - 0xB8003500U) >> 2] = val;
+        return;
+    }
+    if (addr >= 0xB8B01000U && addr < 0xB8B01040U) {
+        if (addr == 0xB8B01000U && (((val >> 8) & 0x1fU) == 0x0fU))
+            g_mdio_0f_writes++;
+        g_pcie_ext[(addr - 0xB8B01000U) >> 2] = val;
+        return;
+    }
+    assert(!"unexpected KSEG1 write address");
+}
+
+#define sr_r32(reg) rsd0614_kseg1_r32(0xB8000000U + (u32)(reg))
+#define sr_w32(val, reg) rsd0614_kseg1_w32((u32)(val), 0xB8000000U + (u32)(reg))
+
+#include "arch/mips/realtek/rsd0614_survey.c"
+
+int main(void) {
+    struct seq_file seq;
+    struct file dummy_file = { 0 };
+    loff_t pos = 0;
+
+    /* 1. Verify init registers exact 0444 (read-only) and 0600 proc nodes */
+    assert(rsd0614_survey_init() == 0);
+    assert(g_proc_count == 2);
+    assert(strcmp(g_proc_entries[0].name, "rsd0614_hw_survey") == 0);
+    assert(g_proc_entries[0].mode == 0444);
+    assert(((const struct file_operations *)g_proc_entries[0].fops)->write == NULL);
+    assert(strcmp(g_proc_entries[1].name, "rsd0614_probe") == 0);
+    assert(g_proc_entries[1].mode == 0600);
+    assert(g_write_count == 0);
+
+    /* 2. Passive survey with CLKMANAGE bit 11 OFF: zero writes, zero SWCORE reads */
+    g_sysc[0x00 >> 2] = 0x81970001U;
+    g_sysc[0x08 >> 2] = 0x41258ee0U;
+    g_sysc[0x10 >> 2] = 0x80003000U; /* bit 11 clear */
+    memset(&seq, 0, sizeof(seq));
+    g_swcore_reads = 0;
+    assert(rsd0614_hw_survey_show(&seq, NULL) == 0);
+    assert(g_write_count == 0);
+    assert(g_swcore_reads == 0);
+    assert(strstr(seq.buf, "BOOTSTRAP_DECODE_XTAL_MHZ=40\n") != NULL);
+    assert(strstr(seq.buf, "BOOTSTRAP_DECODE_CPU_MHZ=1000\n") != NULL);
+    assert(strstr(seq.buf, "BOOTSTRAP_DECODE_DDR2_533=1\n") != NULL);
+    assert(strstr(seq.buf, "SWCORE_SKIPPED=clkmanage_bit11_off\n") != NULL);
+
+    /* 3. Passive survey with CLKMANAGE bit 11 ON: reads SWCORE, still zero writes */
+    g_sysc[0x10 >> 2] = 0x80003800U;
+    memset(&seq, 0, sizeof(seq));
+    assert(rsd0614_hw_survey_show(&seq, NULL) == 0);
+    assert(g_write_count == 0);
+    assert(g_swcore_reads > 0);
+    assert(strstr(seq.buf, "SWCORE_PITCR=0x12345678\n") != NULL);
+
+    /* 4. Reject arbitrary /proc/rsd0614_probe inputs with -EINVAL and zero writes */
+    assert(rsd0614_probe_write(&dummy_file, "reset\n", 6, &pos) == -EINVAL);
+    assert(rsd0614_probe_write(&dummy_file, "pcie1\n", 6, &pos) == -EINVAL);
+    assert(rsd0614_probe_write(&dummy_file, "", 0, &pos) == -EINVAL);
+    assert(g_write_count == 0);
+
+    /* 5. SMI probe skipped safely with ZERO writes when PIN_MUX_SEL2 mismatches */
+    g_pinmux[0x08 >> 2] = 0x00000110U;
+    g_gpio[0x00 >> 2] = 0x00000000U;
+    assert(rsd0614_probe_write(&dummy_file, "smi\n", 4, &pos) == 4);
+    assert(g_write_count == 0);
+    assert(strcmp(g_smi_res.status, "skipped_pinmux_mismatch") == 0);
+
+    /* 6. SMI probe with valid pinmux: never touches PEFGH, restores PABCD bits 18..19 */
+    g_pinmux[0x08 >> 2] = 0x00000660U;
+    g_gpio[0x00 >> 2] = 0x00000000U;
+    g_gpio[0x08 >> 2] = 0xAAAA5555U; /* orig PABCD_DIR */
+    g_gpio[0x0C >> 2] = 0x5555AAAAU; /* orig PABCD_DAT */
+    g_pefgh_writes = 0;
+    assert(rsd0614_probe_write(&dummy_file, "smi\n", 4, &pos) == 4);
+    assert(strcmp(g_smi_res.status, "ok") == 0);
+    assert(g_pefgh_writes == 0);
+    assert(g_gpio[0x08 >> 2] == 0xAAAA5555U);
+    assert(g_gpio[0x0C >> 2] == 0x5555AAAAU);
+
+    /* 7. WMAC probe: saves/restores SR+0x64 and keeps GIMR BIT(29) masked */
+    g_sysc[0x64 >> 2] = 0x00000000U;
+    g_gicr[0x00 >> 2] = BIT(29); /* even if accidentally set, probe masks it */
+    g_wmac[0x00 >> 2] = 0x12345678U;
+    g_wmac[0xF0 >> 2] = 0x00002000U; /* cut = 2 */
+    g_wmac[0xFC >> 2] = 0x0000000EU; /* hal_type = 14 */
+    assert(rsd0614_probe_write(&dummy_file, "wmac\n", 5, &pos) == 5);
+    assert(strcmp(g_wmac_res.status, "ok") == 0);
+    assert(g_sysc[0x64 >> 2] == 0x00000000U);
+    assert((g_gicr[0x00 >> 2] & BIT(29)) == 0U);
+    assert(g_wmac_res.cut_ver == 2U && g_wmac_res.hal_type_id == 14U);
+
+    /* 8. PCIe0 probe with LTSSM != 0x11: NEVER reads 0xB8B10000! */
+    g_pcie_rc[0x728 >> 2] = 0x00000002U;
+    g_ep_cfg_reads = 0;
+    g_mdio_0f_writes = 0;
+    assert(rsd0614_probe_write(&dummy_file, "pcie0\n", 6, &pos) == 6);
+    assert(strcmp(g_pcie0_res.status, "link_down") == 0);
+    assert(g_ep_cfg_reads == 0);
+    assert(g_mdio_0f_writes == 1); /* 40 MHz MDIO table selected */
+
+    /* 9. PCIe0 probe with LTSSM == 0x11: reads 10ec:b814 cleanly */
+    g_pcie_rc[0x728 >> 2] = 0x00000011U;
+    g_pcie_rc[0x000 >> 2] = 0x819710ecU;
+    g_pcie_ep[0x000 >> 2] = 0xb81410ecU;
+    g_pcie_ep[0x008 >> 2] = 0x02800000U;
+    g_pcie_ep[0x02C >> 2] = 0xb81410ecU;
+    assert(rsd0614_probe_write(&dummy_file, "pcie0\n", 6, &pos) == 6);
+    assert(strcmp(g_pcie0_res.status, "link_up") == 0);
+    assert(g_ep_cfg_reads == 3);
+    assert((g_pcie0_res.ep_id & 0xffffU) == 0x10ecU);
+    assert(((g_pcie0_res.ep_id >> 16) & 0xffffU) == 0xb814U);
+
+    return 0;
+}
+"""
+
 DW8250_SIM_STUB_H = r"""#ifndef STUB_COMMON_H
 #define STUB_COMMON_H
 #include <stdint.h>
@@ -492,8 +785,51 @@ class SourceTests(unittest.TestCase):
   src='CONFIG_NET_RTL819X=y\nCONFIG_RTL8192CD=m\nCONFIG_SPI_SHEIPA=y\n';one=hs.patch_kernel_config(src);self.assertEqual(hs.patch_kernel_config(one),one);self.assertIn('CONFIG_SPI_SHEIPA=y',one)
   for key in hs.DISABLE_KERNEL:self.assertIn('# '+key+' is not set',one)
  def test_loopback_files_no_physical_operations(self):
-  for body in hs.BASE_FILES.values():
-   for forbidden in ('/dev/mtd','swconfig ','/sys/module/rtl819x','/proc/rtl865','192.168.'):self.assertNotIn(forbidden,body)
+  for name,body in hs.BASE_FILES.items():
+   for forbidden in ('swconfig ','/sys/module/rtl819x','/proc/rtl865','192.168.'):self.assertNotIn(forbidden,body,name)
+   if name!='usr/sbin/rsd0614-survey':
+    self.assertNotIn('/dev/mtd',body,name)
+ def test_omnibus_survey_script_readonly_and_secret_redaction(self):
+  s=hs.BASE_FILES['usr/sbin/rsd0614-survey']
+  self.assertTrue(s.startswith('#!/bin/sh\n'))
+  for forbidden in ('/dev/mtdblock','mtd write','mtd erase','flash_erase','sysupgrade','AUTOBURN 1','FLW '):
+   self.assertNotIn(forbidden,s)
+  self.assertEqual(re.findall(r'/dev/mtd[0-9]+(?![a-z])',s),[])
+  concrete_mtd=set(re.findall(r'/dev/mtd[0-9]+ro\b',s))
+  self.assertEqual(concrete_mtd,{'/dev/mtd0ro','/dev/mtd2ro'})
+  for name,body in hs.BASE_FILES.items():
+   if name!='usr/sbin/rsd0614-survey':
+    self.assertNotIn('rsd0614-survey',body,name)
+  guide=subprocess.run(['sh','-c',s,'rsd0614-survey','backup-guide'],capture_output=True,text=True)
+  self.assertEqual(guide.returncode,0,guide.stderr)
+  self.assertIn('Persistent flash is strictly NO-GO',guide.stdout)
+  self.assertIn('AGENTS.md',guide.stdout)
+  bad=subprocess.run(['sh','-c',s,'rsd0614-survey','unknown-subcmd'],capture_output=True,text=True)
+  self.assertEqual(bad.returncode,2)
+ def test_omnibus_survey_patch_applies_and_passes_c_simulation(self):
+  mk_text,survey_bytes=build_patched_survey()
+  self.assertIn('obj-$(CONFIG_SOC_RTL8197F) += rsd0614_survey.o',mk_text)
+  stext=survey_bytes.decode()
+  for token in (
+   'proc_create("rsd0614_hw_survey", 0444, NULL, &rsd0614_hw_survey_fops)',
+   '.write = NULL,',
+   'proc_create("rsd0614_probe", 0600, NULL, &rsd0614_probe_fops)',
+   '(sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO',
+   '(cnr & RSD0614_SMI_PIN_MASK) != 0U',
+   'orig_64 = sr_r32(REALTEK_SR_WLAN_EN);',
+   'sr_w32(orig_64, REALTEK_SR_WLAN_EN);',
+   'if ((ltssm & 0x1fU) == 0x11U)',
+  ):self.assertIn(token,stext)
+  self.assertNotIn('while (1)',stext)
+  self.assertNotIn('smi_write_reg(0x1322',stext)
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);(root/'arch/mips/realtek').mkdir(parents=True)
+   (root/'arch/mips/realtek/rsd0614_survey.c').write_bytes(survey_bytes)
+   (root/'sim_survey.c').write_text(SURVEY_SIM_C)
+   cc=subprocess.run(['gcc','-std=gnu11','-O2','-Wall','-Wextra','-Werror','-I',str(root),str(root/'sim_survey.c'),'-o',str(root/'sim_survey')],capture_output=True,text=True)
+   self.assertEqual(cc.returncode,0,cc.stdout+cc.stderr)
+   ex=subprocess.run([str(root/'sim_survey')],capture_output=True,text=True)
+   self.assertEqual(ex.returncode,0,ex.stdout+ex.stderr)
  def test_all_local_shell_fragments_parse(self):
   for name,body in hs.BASE_FILES.items():
    if body.startswith('#!'):
@@ -569,11 +905,11 @@ class SourceTests(unittest.TestCase):
    wlen=value & 0x03
    return ((value & ~0x03)|(wlen-2)) if wlen in (2,3) else value
   self.assertEqual(translate(0x13),0x11);self.assertEqual(translate(0x83),0x81);self.assertEqual(translate(0x0b),0x09);self.assertEqual(translate(0x01),0x01)
- def test_builder_v540_volume_separate(self):
-  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v540-work',t);self.assertIn("-ne 'v5.4.0'",t);self.assertIn('rsd0614.work=v5.4.0',t)
-  for old_vol in ('rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
+ def test_builder_v541_volume_separate(self):
+  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v541-work',t);self.assertIn("-ne 'v5.4.1'",t);self.assertIn('rsd0614.work=v5.4.1',t)
+  for old_vol in ('rsd0614-openwrt-v540-work','rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
   self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
-  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v540-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.4.0');self.assertIn('rsd0614-openwrt-v539-work',hv['preserve_old_volumes'])
+  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v541-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.4.1');self.assertIn('rsd0614-openwrt-v540-work',hv['preserve_old_volumes'])
  def test_builder_ps1_captures_image_id_before_recording_and_env(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig')
   assign="$ImageId = (& docker image inspect $Image --format '{{.Id}}' | Out-String).Trim()"
@@ -583,6 +919,8 @@ class SourceTests(unittest.TestCase):
   self.assertLess(t.index(assign),t.index(record));self.assertLess(t.index(record),t.index(env_arg))
  def test_build_prefetches_sources_before_parallel_compile(self):
   t=(ROOT/'build-rsd0614-initramfs.sh').read_text();download='STAGE=download; make download V=s';compile='STAGE=compile; make -j"$JOBS" V=s';self.assertIn(download,t);self.assertIn(compile,t);self.assertLess(t.index(download),t.index(compile))
+  self.assertIn('STAGE=cache_hydrate',t);self.assertLess(t.index('STAGE=defconfig'),t.index('STAGE=cache_hydrate'));self.assertLess(t.index('STAGE=cache_hydrate'),t.index(download))
+  for forbidden_cached in ('build_dir/target-','staging_dir/target-','staging_dir/packages'):self.assertNotIn(forbidden_cached,t)
  def test_deep_audit_runs_before_candidate_result(self):
   t=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertLess(t.index('"$PORT_DIR/deep_audit.py"'),t.index("echo 'COMPILE=PASS'"));self.assertIn('export_build_evidence.py',t)
  def test_repo_manifest_matches_current_files(self):
@@ -595,13 +933,14 @@ class SourceTests(unittest.TestCase):
    if actual!=digest:mismatch.append((rel,digest,actual))
   self.assertEqual(missing,[],f'missing manifest files: {missing}')
   self.assertEqual(mismatch,[],f'manifest hash drift: {mismatch}')
- def test_v540_metadata_and_provenance_wiring(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.4.0');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths and firmware MTD splitters suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent']);self.assertIn('enable spi0 with bounded spi-sheipa timeouts',lock['intent'])
-  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.4.0-spi-nor-readonly\n')
-  self.assertIn("b'v5.4.0-spi-nor-readonly\\n'",(ROOT/'deep_audit.py').read_text())
+ def test_v541_metadata_and_provenance_wiring(self):
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.4.1');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths and firmware MTD splitters suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent']);self.assertIn('enable spi0 with bounded spi-sheipa timeouts',lock['intent']);self.assertIn('/proc/rsd0614_hw_survey',lock['intent'])
+  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.4.1-omnibus-readonly-survey\n')
+  self.assertIn("b'v5.4.1-omnibus-readonly-survey\\n'",(ROOT/'deep_audit.py').read_text())
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)
-  wrapper=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)
-  workflow=(ROOT/'.github/workflows/build-initramfs.yml').read_text();self.assertIn('BUILDER_IMAGE_ID=',workflow);self.assertIn('PROJECT_COMMIT=$GITHUB_SHA',workflow)
+  wrapper_raw=(ROOT/'Build-RSD0614.ps1').read_bytes();self.assertTrue(wrapper_raw.startswith(b'\xef\xbb\xbf'))
+  wrapper=wrapper_raw.decode('utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)
+  workflow=(ROOT/'.github/workflows/build-initramfs.yml').read_text();self.assertIn('BUILDER_IMAGE_ID=',workflow);self.assertIn('PROJECT_COMMIT=$GITHUB_SHA',workflow);self.assertIn("default: '4'",workflow);self.assertIn("JOBS=${{ inputs.jobs || '4' }}",workflow);self.assertIn('actions/cache@v4',workflow);self.assertIn('-e CACHE_DIR=/cache',workflow)
 class TreeTransactionTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.tree=self.root/'openwrt';self.tree.mkdir();self.audit=self.root/'audit';target=self.tree/'target/linux/realtek';(target/'base-files/etc/init.d').mkdir(parents=True);(target/'base-files/etc/init.d/dir842-asic').write_text('fixture old script');(target/'image').mkdir();(target/'image/Makefile').write_text('DEVICE_VARS += IMAGE_SIZE\ndefine Device/RSD0614\nendef\n');(target/'rtl8197f').mkdir();(target/'rtl8197f/config-4.14').write_text('CONFIG_NET_RTL819X=y\n');irq=target/'files-4.14/arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_UNSAFE_BLOCK+'\n');boot=self.tree/'package/base-files/files/etc/init.d/boot';boot.parent.mkdir(parents=True);boot.write_text('#!/bin/sh /etc/rc.common\nboot() {\n'+hs.BOOT_MOUNT_ROOT_LINE+'\t/sbin/kmodloader\n}\n');defaultnet=self.tree/'package/base-files/files/etc/board.d/99-default_network';defaultnet.parent.mkdir(parents=True);defaultnet.write_text('. /lib/functions/uci-defaults.sh\nboard_config_update\n'+hs.DEFAULT_NETWORK_UNSAFE+'board_config_flush\n')
@@ -609,7 +948,7 @@ class TreeTransactionTests(unittest.TestCase):
   git('init','-q');git('add','.');git('-c','user.name=Fixture','-c','user.email=test@example.invalid','commit','-qm','fixture');self.head=git('rev-parse','HEAD');self.target=target
  def tearDown(self):self.tmp.cleanup()
  def test_real_filesystem_isolation(self):
-  result=hs.harden(self.tree,ROOT,self.audit,expected=self.head);self.assertEqual({r['path'] for r in hs.tree_records(self.target/'base-files')},set(hs.BASE_FILES));self.assertIn(hs.IRQ_SAFE_BLOCK,(self.target/'files-4.14/arch/mips/realtek/irq.c').read_text());self.assertNotIn('mount_root',(self.tree/'package/base-files/files/etc/init.d/boot').read_text());self.assertNotIn("ucidef_set_interface_lan 'eth0'",(self.tree/'package/base-files/files/etc/board.d/99-default_network').read_text());self.assertTrue((Path(result['retained_source_backup'])/'etc/init.d/dir842-asic').exists());self.assertFalse((self.target/'base-files/etc/init.d/dir842-asic').exists());self.assertEqual((self.target/'base-files').stat().st_mode&0o777,0o755);hs.harden(self.tree,ROOT,self.audit,expected=self.head);self.assertEqual({r['path'] for r in hs.tree_records(self.target/'base-files')},set(hs.BASE_FILES))
+  result=hs.harden(self.tree,ROOT,self.audit,expected=self.head);self.assertEqual({r['path'] for r in hs.tree_records(self.target/'base-files')},set(hs.BASE_FILES));self.assertIn(hs.IRQ_SAFE_BLOCK,(self.target/'files-4.14/arch/mips/realtek/irq.c').read_text());self.assertNotIn('mount_root',(self.tree/'package/base-files/files/etc/init.d/boot').read_text());self.assertNotIn("ucidef_set_interface_lan 'eth0'",(self.tree/'package/base-files/files/etc/board.d/99-default_network').read_text());self.assertTrue((Path(result['retained_source_backup'])/'etc/init.d/dir842-asic').exists());self.assertFalse((self.target/'base-files/etc/init.d/dir842-asic').exists());self.assertEqual((self.target/'base-files').stat().st_mode&0o777,0o755);self.assertEqual((self.target/'base-files/usr/sbin/rsd0614-survey').stat().st_mode&0o777,0o755);self.assertTrue((self.target/'patches-4.14'/hs.SURVEY_PATCH_NAME).is_file());hs.harden(self.tree,ROOT,self.audit,expected=self.head);self.assertEqual({r['path'] for r in hs.tree_records(self.target/'base-files')},set(hs.BASE_FILES))
  def test_bad_revision_no_mutation(self):
   before=hs.tree_records(self.target)
   with self.assertRaises(ValueError):hs.harden(self.tree,ROOT,self.audit,expected='0'*40)
@@ -640,15 +979,16 @@ class ExportEvidenceTests(unittest.TestCase):
  @classmethod
  def setUpClass(cls):
   cls.patched_dw8250=build_patched_dw8250()
+  _,cls.patched_survey=build_patched_survey()
   cls.serial_reg_bytes=(ROOT/'fixtures/linux-4.14.187/include/uapi/linux/serial_reg.h').read_bytes()
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.tree=self.root/'tree';self.out=self.root/'out';self.linux=self.tree/'build_dir/target-mipsel_24kc_musl/linux-realtek_rtl8197f/linux-4.14.187';self.linux.mkdir(parents=True);(self.linux/'.config').write_text('CONFIG_MTD_SPI_NOR=y\nCONFIG_SPI_SHEIPA=y\nCONFIG_SOC_RTL8197F=y\nCONFIG_SERIAL_8250=y\nCONFIG_SERIAL_8250_CONSOLE=y\nCONFIG_SERIAL_8250_DW=y\n')
   for n in ('System.map','vmlinux'):(self.linux/n).write_text('explicit fixture')
   for n in ('vmlinux-initramfs.elf','vmlinux-initramfs.debug'):(self.linux.parent/n).write_text('explicit fixture')
-  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');sheipa=self.linux/'drivers/spi/spi-sheipa.c';sheipa.parent.mkdir(parents=True);sheipa.write_text('spi-sheipa: getdr RFNE timeout\nspi-sheipa: spi_flash_wait_busy TIMEOUT\nspi-sheipa: flash_wait_busy TIMEOUT\nif (clk_div < 28)\n\tclk_div = 28;\n');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
+  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');sheipa=self.linux/'drivers/spi/spi-sheipa.c';sheipa.parent.mkdir(parents=True);sheipa.write_text('spi-sheipa: getdr RFNE timeout\nspi-sheipa: spi_flash_wait_busy TIMEOUT\nspi-sheipa: flash_wait_busy TIMEOUT\nif (clk_div < 28)\n\tclk_div = 28;\n');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');survey=self.linux/'arch/mips/realtek/rsd0614_survey.c';survey.write_bytes(self.patched_survey);uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
  def tearDown(self):self.tmp.cleanup()
  def test_export_only_records_fixture_not_boot_success(self):
-  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),10);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
+  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),11);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
  def test_export_records_provenance(self):
   from export_build_evidence import export;export(self.tree,self.out,self.log,port_fingerprint='a'*64,project_commit='b'*40,builder_image_id='sha256:'+'c'*64);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(manifest['provenance'],{'port_input_fingerprint':'a'*64,'project_commit':'b'*40,'builder_image_id':'sha256:'+'c'*64})
  def test_wrong_board_rejected(self):
@@ -667,6 +1007,16 @@ class ExportEvidenceTests(unittest.TestCase):
  def test_unbounded_spi_sheipa_rejected(self):
   from export_build_evidence import export
   p=self.linux/'drivers/spi/spi-sheipa.c';p.write_text(p.read_text()+'\nwhile (1) {}\n')
+  with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
+ def test_missing_omnibus_survey_source_rejected(self):
+  from export_build_evidence import export;(self.linux/'arch/mips/realtek/rsd0614_survey.c').unlink()
+  with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
+ def test_survey_unbounded_loop_or_missing_ltssm_guard_rejected(self):
+  from export_build_evidence import export
+  p=self.linux/'arch/mips/realtek/rsd0614_survey.c';orig=p.read_text()
+  p.write_text(orig+'\n/* while (1) */\n')
+  with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
+  p.write_text(orig.replace('if ((ltssm & 0x1fU) == 0x11U)','if (1)'))
   with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
  def test_modified_generic_serial_reg_rejected(self):
   from export_build_evidence import export;(self.linux/'include/uapi/linux/serial_reg.h').write_text('#define UART_RX 9\n#define UART_TX 9\n#define UART_IIR_ID 0x0e\n#define UART_LCR_WLEN7 0x00\n#define UART_LCR_WLEN8 0x01\n')

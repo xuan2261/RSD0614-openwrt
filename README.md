@@ -1,6 +1,6 @@
 # Rock Space RSD0614 OpenWrt bring-up
 
-Experimental, evidence-driven OpenWrt/Linux bring-up for **Rock Space RSD0614 V1.0** on the Realtek RTL8197F family.
+Experimental, evidence-driven OpenWrt/Linux bring-up for **Rock Space RSD0614 V1.0** on the Realtek RTL8197F family (`RTL8197FH-VG`).
 
 ## Current milestone
 
@@ -10,9 +10,9 @@ The project has already verified on a physical RSD0614 unit:
 - BH25Q64 8 MiB SPI NOR;
 - UART `115200 8N1` and RealTek bootloader command mode;
 - TFTP RAM load at `0x81000000` with `AUTOBURN 0`;
-- a first OpenWrt 4.14.187 RAM-boot reached Linux and selected the RSD0614 DTB;
-- the first candidate stopped shortly after the serial-console handoff, before userspace;
-- the current **v5.3.3 pre-RAM diagnostic candidate disables SPI, PCIe, WMAC and Ethernet**, adds `initcall_debug ignore_loglevel`, clears/masks unused direct NET/PCIe/WiFi IRQ sources, removes enabled automatic `mount_root` paths, and suppresses generic `eth0`/`eth1` synthesis.
+- OpenWrt 4.14.187 RAM-boot reaches Linux kernel init and `procd` userspace (`keep_bootcon`);
+- v5.3.7 bounded UART IRQ diagnostics isolated silent `ttyS0` TX and the RX-timeout storm (`timeout=441/512`, `lsr=61`, `rbr=00`, `lcr=13`) to `0004-rtl8197f-dw-uart.patch` forcing non-VG `+0x24`/`adjlcr` quirks onto **RTL8197FH-VG** (`0x81970000`, standard `+0x00` 16550/DW-APB);
+- the current **v5.3.9 (`v5.3.9-uart-soc-id-dispatch`) candidate** dispatches RTL8197F DW8250 register/LCR/divisor quirks at runtime from `realtek,rtl819x-sysc` SoC ID while keeping **SPI, PCIe0/1, WMAC and Ethernet disabled**, clearing/masking unused direct NET/PCIe/WiFi IRQ sources, removing enabled automatic `mount_root` paths, and suppressing generic `eth0`/`eth1` synthesis (`NOT YET VERIFIED` on hardware).
 
 ## Safety contract
 

@@ -30,20 +30,21 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     if not uart_required:raise ValueError('Generic serial_reg.h was unexpectedly changed; RTL8197F mapping must stay in post-0004 DW8250 source')
     dwsrc=linux/'drivers/tty/serial/8250/8250_dw.c';dwtext=dwsrc.read_text()
     if not re.search(r'\bu8\s+last_lcr\s*;',dwtext):raise ValueError('RTL8197F BUSY-replay last_lcr field missing from compiled source')
+    if not re.search(r'\bunsigned\s+int\s+is_rtl8197f\s*:\s*1\s*;',dwtext):raise ValueError('RTL8197F is_rtl8197f bitfield missing from compiled source')
     for token in (
         'of_device_is_compatible(np, "realtek,rtl8197f-uart")',
-        'data->tx_reg = 9;',
-        'data->rx_reg = 9;',
-        'data->adjlcr=true;',
         'p->type = PORT_16550A;',
+        'p->flags |= UPF_SKIP_TEST | UPF_FIXED_TYPE;',
         'data->skip_autocfg = true;',
         'd->last_lcr = value;',
+        'if (d->is_rtl8197f)',
         'writel(d->last_lcr,',
         'data->last_lcr = p->serial_in(p, UART_LCR);'
     ):
         if token not in dwtext:raise ValueError('RTL8197F post-0004/BUSY-replay semantic missing from compiled source: '+token)
     for token in (
         'static void rtl8197f_diag_irq(',
+        'if (!d->is_rtl8197f || d->diag_dumped)',
         'd->diag_total == 512',
         'd->diag_msi++',
         'd->diag_thri++',
@@ -60,18 +61,42 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     ):
         if token not in dwtext:raise ValueError('RTL8197F bounded IRQ-cause diagnostic missing from compiled source: '+token)
     for token in (
+        '#include <linux/of_address.h>',
+        'static u32 rtl8197f_read_soc_id(void)',
+        'of_find_compatible_node(NULL, NULL, "realtek,rtl819x-sysc")',
+        'of_iomap(sysc, 0)',
+        'iounmap(base)',
+        'of_node_put(sysc)',
         'static int rtl8197f_dl_read(struct uart_8250_port *up)',
         'static void rtl8197f_dl_write(struct uart_8250_port *up, int value)',
         'UART_DLL << p->regshift',
         'UART_DLM << p->regshift',
+        'static int rtl8197f_translate_lcr(struct dw8250_data *d, int value)',
         'unsigned int wlen = value & UART_LCR_WLEN8;',
         'value = (value & ~UART_LCR_WLEN8) | (wlen - 2);',
+        'value = rtl8197f_translate_lcr(d, value);',
+        'u32 soc_id = rtl8197f_read_soc_id();',
+        'bool is_non_vg = ((soc_id & 0xFFFFF000U) == 0x8197F000U);',
+        'data->is_rtl8197f = true;',
+        'data->tx_reg = 9;',
+        'data->rx_reg = 9;',
+        'data->adjlcr = true;',
         'up->dl_read = rtl8197f_dl_read;',
-        'up->dl_write = rtl8197f_dl_write;'
+        'up->dl_write = rtl8197f_dl_write;',
+        'data->tx_reg = UART_TX;',
+        'data->rx_reg = UART_RX;',
+        'data->adjlcr = false;',
+        'rtl8197f-uart: soc_id=0x%08x mode=%s tx_reg=%u rx_reg=%u adjlcr=%u\\n'
     ):
-        if token not in dwtext:raise ValueError('RTL8197F v5.3.8 register semantic missing from compiled source: '+token)
-    if 'if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)' in dwtext:
-        raise ValueError('Stale whole-value RTL8197F LCR adjustment survived compiled source')
+        if token not in dwtext:raise ValueError('RTL8197F v5.3.9 SoC-ID dispatch semantic missing from compiled source: '+token)
+    if dwtext.count('value = rtl8197f_translate_lcr(d, value);')!=3:
+        raise ValueError('Expected pre-write rtl8197f_translate_lcr call in all three dw8250_serial_out paths')
+    for forbidden,reason in (
+        ('p->flags = UPF_SKIP_TEST| UPF_FIXED_TYPE;','Stale RTL8197F p->flags assignment clobbering UPF_SHARE_IRQ|UPF_FIXED_PORT survived compiled source'),
+        ('if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)','Stale whole-value RTL8197F LCR adjustment survived compiled source'),
+        ('if (!d->adjlcr || d->diag_dumped)','Stale !d->adjlcr IRQ diagnostic guard survived compiled source'),
+    ):
+        if forbidden in dwtext:raise ValueError(reason)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))

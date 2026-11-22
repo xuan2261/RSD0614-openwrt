@@ -1,9 +1,45 @@
 --- a/drivers/tty/serial/8250/8250_dw.c
 +++ b/drivers/tty/serial/8250/8250_dw.c
-@@ -104,16 +104,38 @@
+@@ -19,6 +19,7 @@
+ #include <linux/serial_8250.h>
+ #include <linux/serial_reg.h>
+ #include <linux/of.h>
++#include <linux/of_address.h>
+ #include <linux/of_irq.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
+@@ -81,6 +82,7 @@
+ 	unsigned int		uart_16550_compatible:1;
+ 	unsigned int		adjlcr:1;
+ 	unsigned int		diag_dumped:1;
++	unsigned int		is_rtl8197f:1;
+ };
+ 
+ static inline int dw8250_modify_msr(struct uart_port *p, int offset, int value)
+@@ -104,18 +106,65 @@
  	(void)p->serial_in(p, UART_RX);
  }
  
++static u32 rtl8197f_read_soc_id(void)
++{
++	struct device_node *sysc;
++	void __iomem *base;
++	u32 soc_id = 0;
++
++	sysc = of_find_compatible_node(NULL, NULL, "realtek,rtl819x-sysc");
++	if (!sysc)
++		return 0;
++
++	base = of_iomap(sysc, 0);
++	if (base) {
++		soc_id = readl(base);
++		iounmap(base);
++	}
++	of_node_put(sysc);
++
++	return soc_id;
++}
++
 +static int rtl8197f_dl_read(struct uart_8250_port *up)
 +{
 +	struct uart_port *p = &up->port;
@@ -25,39 +61,112 @@
 +	       p->membase + (UART_DLM << p->regshift));
 +}
 +
- static void dw8250_check_lcr(struct uart_port *p, int value)
- {
- 	void __iomem *offset = p->membase + (UART_LCR << p->regshift);
- 	int tries = 1000;
- 	struct dw8250_data *d = p->private_data;
- 
--	if(d->adjlcr)
--	{
--		if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)
--			value -= 2;
++static int rtl8197f_translate_lcr(struct dw8250_data *d, int value)
++{
 +	if (d->adjlcr) {
 +		unsigned int wlen = value & UART_LCR_WLEN8;
 +
 +		if (wlen == UART_LCR_WLEN7 || wlen == UART_LCR_WLEN8)
 +			value = (value & ~UART_LCR_WLEN8) | (wlen - 2);
- 		d->last_lcr = value;
- 	}
- 
-@@ -433,6 +455,8 @@
- 
- static void dw8250_quirks(struct uart_port *p, struct dw8250_data *data)
- {
-+	struct uart_8250_port *up = up_to_u8250p(p);
++	}
++	if (d->is_rtl8197f)
++		d->last_lcr = value;
 +
- 	if (p->dev->of_node) {
- 		struct device_node *np = p->dev->of_node;
- 		int id;
-@@ -458,6 +482,8 @@
- 			data->rx_reg = 9;
- 			data->adjlcr=true;
++	return value;
++}
++
+ static void dw8250_check_lcr(struct uart_port *p, int value)
+ {
+ 	void __iomem *offset = p->membase + (UART_LCR << p->regshift);
+ 	int tries = 1000;
+-	struct dw8250_data *d = p->private_data;
+-
+-	if(d->adjlcr)
+-	{
+-		if(value == UART_LCR_WLEN7 || value == UART_LCR_WLEN8)
+-			value -= 2;
+-		d->last_lcr = value;
+-	}
+ 
+ 	/* Make sure LCR write wasn't ignored */
+ 	while (tries--) {
+@@ -159,6 +208,8 @@
+ 	struct dw8250_data *d = p->private_data;
+ 
+ 	offset = dw_change_offset(p, offset);
++	if (offset == UART_LCR)
++		value = rtl8197f_translate_lcr(d, value);
+ 	writeb(value, p->membase + (offset << p->regshift));
+ 
+ 	if (offset == UART_LCR && !d->uart_16550_compatible)
+@@ -202,6 +253,8 @@
+ 	struct dw8250_data *d = p->private_data;
+ 
+ 	offset = dw_change_offset(p, offset);
++	if (offset == UART_LCR)
++		value = rtl8197f_translate_lcr(d, value);
+ 	writel(value, p->membase + (offset << p->regshift));
+ 
+ 	if (offset == UART_LCR && !d->uart_16550_compatible)
+@@ -221,6 +274,8 @@
+ 	struct dw8250_data *d = p->private_data;
+ 
+ 	offset = dw_change_offset(p, offset);
++	if (offset == UART_LCR)
++		value = rtl8197f_translate_lcr(d, value);
+ 	iowrite32be(value, p->membase + (offset << p->regshift));
+ 
+ 	if (offset == UART_LCR && !d->uart_16550_compatible)
+@@ -242,7 +297,7 @@
+ {
+ 	unsigned int id = iir & 0x3f;
+ 
+-	if (!d->adjlcr || d->diag_dumped)
++	if (!d->is_rtl8197f || d->diag_dumped)
+ 		return;
+ 
+ 	d->diag_total++;
+@@ -343,7 +398,7 @@
+ 	if ((iir & UART_IIR_BUSY) == UART_IIR_BUSY) {
+ 		/* Clear the USR */
+ 		(void)p->serial_in(p, d->usr_reg);
+-		if (d->adjlcr)
++		if (d->is_rtl8197f)
+ 			writel(d->last_lcr,
+ 			       p->membase + (UART_LCR << p->regshift));
+ 
+@@ -452,13 +507,30 @@
+ 		}
+ #endif
+ 		if (of_device_is_compatible(np, "realtek,rtl8197f-uart")) {
++			struct uart_8250_port *up = up_to_u8250p(p);
++			u32 soc_id = rtl8197f_read_soc_id();
++			bool is_non_vg = ((soc_id & 0xFFFFF000U) == 0x8197F000U);
++
++			data->is_rtl8197f = true;
+ 			p->type = PORT_16550A;
+-			p->flags = UPF_SKIP_TEST| UPF_FIXED_TYPE;
+-			data->tx_reg = 9;
+-			data->rx_reg = 9;
+-			data->adjlcr=true;
++			p->flags |= UPF_SKIP_TEST | UPF_FIXED_TYPE;
  			data->skip_autocfg = true;
-+			up->dl_read = rtl8197f_dl_read;
-+			up->dl_write = rtl8197f_dl_write;
++			if (is_non_vg) {
++				data->tx_reg = 9;
++				data->rx_reg = 9;
++				data->adjlcr = true;
++				up->dl_read = rtl8197f_dl_read;
++				up->dl_write = rtl8197f_dl_write;
++			} else {
++				data->tx_reg = UART_TX;
++				data->rx_reg = UART_RX;
++				data->adjlcr = false;
++			}
  			data->last_lcr = p->serial_in(p, UART_LCR);
++			dev_info(p->dev,
++				 "rtl8197f-uart: soc_id=0x%08x mode=%s tx_reg=%u rx_reg=%u adjlcr=%u\n",
++				 soc_id, is_non_vg ? "non-vg" : "vg-std",
++				 data->tx_reg, data->rx_reg, data->adjlcr);
  		}
  
+ 		if (of_device_is_big_endian(p->dev->of_node)) {

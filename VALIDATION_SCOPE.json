@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.3.9",
+  "bundle_version": "5.4.0",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 119,
+  "regression_tests_per_run": 121,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -16,11 +16,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS on GitHub Actions run 45026415476 (commit 221aae12593f5b86aaa4d68e514ea82b1ddd1ade, sha256 e8199f3abde18b91c460df6eef265218226e33fb6bbad2a3fb09b1219ad65768, size 2928560, offline structural audit PASS 24/24, ELF _end 0x809e31d0)",
-  "hardware_runtime": "PASS on physical Rock Space RSD0614 V1.0 (AUTOBURN 0, LOADADDR 81000000, size 0x2CAFB0; soc_id=0x81970001 mode=vg-std tx_reg=0 rx_reg=0 adjlcr=0; ttyS0 16550A TX/RX handoff and interactive OpenWrt ash shell verified; /proc/interrupts irq17=102, ERR=0, sheipa_spi_init=-19)",
+  "openwrt_compile": "NOT YET VERIFIED FOR v5.4.0",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.4.0",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.3.7 on RTL8197FH-VG: early0 outputs normally via dynamic 0xB8000000 SoC-ID check, while ttyS0 had silent TX and RX timeout storm (441/512, lsr=61, rbr=00, iir=cc->rx:cc, lcr=13) because 0004 forced non-VG tx_reg/rx_reg=9 (+0x24) and adjlcr=true onto RTL8197FH-VG (0x81970000, standard +0x00)",
-  "preflight": "PASS on GitHub Actions run 45031113801",
-  "previous_build_result": "v5.3.8 run 36808678578: compile and offline structural audit passed, but retained static +0x24/adjlcr semantics incompatible with RTL8197FH-VG (0x81970000) and translated LCR after MMIO write"
+  "previous_hardware_result": "v5.3.9 on physical Rock Space RSD0614 V1.0: PASS (soc_id=0x81970001 mode=vg-std tx_reg=0 rx_reg=0 adjlcr=0; clean ttyS0 16550A TX/RX handoff and interactive OpenWrt ash shell; /proc/interrupts irq17=102, ERR=0)",
+  "preflight": "NOT YET VERIFIED FOR v5.4.0",
+  "previous_build_result": "v5.3.9 run 45026415476: compile, offline structural audit (24/24) and physical RAM-boot interactive shell qualification all PASSED"
 }

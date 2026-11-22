@@ -569,11 +569,11 @@ class SourceTests(unittest.TestCase):
    wlen=value & 0x03
    return ((value & ~0x03)|(wlen-2)) if wlen in (2,3) else value
   self.assertEqual(translate(0x13),0x11);self.assertEqual(translate(0x83),0x81);self.assertEqual(translate(0x0b),0x09);self.assertEqual(translate(0x01),0x01)
- def test_builder_v539_volume_separate(self):
-  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v539-work',t);self.assertIn("-ne 'v5.3.9'",t);self.assertIn('rsd0614.work=v5.3.9',t)
-  for old_vol in ('rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
+ def test_builder_v540_volume_separate(self):
+  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v540-work',t);self.assertIn("-ne 'v5.4.0'",t);self.assertIn('rsd0614.work=v5.4.0',t)
+  for old_vol in ('rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
   self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
-  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v539-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.3.9');self.assertIn('rsd0614-openwrt-v538-work',hv['preserve_old_volumes'])
+  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v540-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.4.0');self.assertIn('rsd0614-openwrt-v539-work',hv['preserve_old_volumes'])
  def test_builder_ps1_captures_image_id_before_recording_and_env(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig')
   assign="$ImageId = (& docker image inspect $Image --format '{{.Id}}' | Out-String).Trim()"
@@ -595,10 +595,10 @@ class SourceTests(unittest.TestCase):
    if actual!=digest:mismatch.append((rel,digest,actual))
   self.assertEqual(missing,[],f'missing manifest files: {missing}')
   self.assertEqual(mismatch,[],f'manifest hash drift: {mismatch}')
- def test_v539_metadata_and_provenance_wiring(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.3.9');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent'])
-  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.3.9-uart-soc-id-dispatch\n')
-  self.assertIn("b'v5.3.9-uart-soc-id-dispatch\\n'",(ROOT/'deep_audit.py').read_text())
+ def test_v540_metadata_and_provenance_wiring(self):
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.4.0');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths and firmware MTD splitters suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent']);self.assertIn('enable spi0 with bounded spi-sheipa timeouts',lock['intent'])
+  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.4.0-spi-nor-readonly\n')
+  self.assertIn("b'v5.4.0-spi-nor-readonly\\n'",(ROOT/'deep_audit.py').read_text())
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)
   wrapper=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)
   workflow=(ROOT/'.github/workflows/build-initramfs.yml').read_text();self.assertIn('BUILDER_IMAGE_ID=',workflow);self.assertIn('PROJECT_COMMIT=$GITHUB_SHA',workflow)
@@ -645,10 +645,10 @@ class ExportEvidenceTests(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.root=Path(self.tmp.name);self.tree=self.root/'tree';self.out=self.root/'out';self.linux=self.tree/'build_dir/target-mipsel_24kc_musl/linux-realtek_rtl8197f/linux-4.14.187';self.linux.mkdir(parents=True);(self.linux/'.config').write_text('CONFIG_MTD_SPI_NOR=y\nCONFIG_SPI_SHEIPA=y\nCONFIG_SOC_RTL8197F=y\nCONFIG_SERIAL_8250=y\nCONFIG_SERIAL_8250_CONSOLE=y\nCONFIG_SERIAL_8250_DW=y\n')
   for n in ('System.map','vmlinux'):(self.linux/n).write_text('explicit fixture')
   for n in ('vmlinux-initramfs.elf','vmlinux-initramfs.debug'):(self.linux.parent/n).write_text('explicit fixture')
-  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
+  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');sheipa=self.linux/'drivers/spi/spi-sheipa.c';sheipa.parent.mkdir(parents=True);sheipa.write_text('spi-sheipa: getdr RFNE timeout\nspi-sheipa: spi_flash_wait_busy TIMEOUT\nspi-sheipa: flash_wait_busy TIMEOUT\nif (clk_div < 28)\n\tclk_div = 28;\n');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
  def tearDown(self):self.tmp.cleanup()
  def test_export_only_records_fixture_not_boot_success(self):
-  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),9);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
+  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),10);self.assertEqual(manifest['loader_board_values'],['RSD0614'])
  def test_export_records_provenance(self):
   from export_build_evidence import export;export(self.tree,self.out,self.log,port_fingerprint='a'*64,project_commit='b'*40,builder_image_id='sha256:'+'c'*64);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(manifest['provenance'],{'port_input_fingerprint':'a'*64,'project_commit':'b'*40,'builder_image_id':'sha256:'+'c'*64})
  def test_wrong_board_rejected(self):
@@ -663,6 +663,10 @@ class ExportEvidenceTests(unittest.TestCase):
   with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
  def test_missing_spi_patch_rejected(self):
   from export_build_evidence import export;(self.linux/'drivers/mtd/spi-nor/spi-nor.c').write_text('not patched')
+  with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
+ def test_unbounded_spi_sheipa_rejected(self):
+  from export_build_evidence import export
+  p=self.linux/'drivers/spi/spi-sheipa.c';p.write_text(p.read_text()+'\nwhile (1) {}\n')
   with self.assertRaises(ValueError):export(self.tree,self.out,self.log)
  def test_modified_generic_serial_reg_rejected(self):
   from export_build_evidence import export;(self.linux/'include/uapi/linux/serial_reg.h').write_text('#define UART_RX 9\n#define UART_TX 9\n#define UART_IIR_ID 0x0e\n#define UART_LCR_WLEN7 0x00\n#define UART_LCR_WLEN8 0x01\n')

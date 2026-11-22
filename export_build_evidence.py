@@ -17,6 +17,15 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     src=linux/'drivers/mtd/spi-nor/spi-nor.c'
     source=src.read_text()
     if not re.search(r'"bh25q64"\s*,\s*INFO\(0x684017',source):raise ValueError('BH25Q64 patch missing from compiled source')
+    sheipasrc=linux/'drivers/spi/spi-sheipa.c';sheipatext=sheipasrc.read_text()
+    for token in (
+        'spi-sheipa: getdr RFNE timeout',
+        'spi-sheipa: spi_flash_wait_busy TIMEOUT',
+        'spi-sheipa: flash_wait_busy TIMEOUT',
+        'if (clk_div < 28)',
+    ):
+        if token not in sheipatext:raise ValueError('Hardened bounded spi-sheipa guard missing from compiled source: '+token)
+    if 'while (1) {' in sheipatext:raise ValueError('Unbounded polling loop survived in compiled spi-sheipa.c')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
     if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
     uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
@@ -101,7 +110,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

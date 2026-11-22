@@ -6,10 +6,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.3.3",
+  "bundle_version": "5.3.9",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only pre-RAM diagnostic; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "serial-only RAM validation candidate; keep_bootcon enabled; v5.3.9 dispatches RTL8197F DW8250 quirks at runtime from realtek,rtl819x-sysc SoC ID so RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM while non-VG RTL8197F (0x8197F000) uses RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM divisor callbacks, preserving UPF_SHARE_IRQ|UPF_FIXED_PORT, v5.3.6 BUSY replay and v5.3.7 bounded IRQ diagnostics; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

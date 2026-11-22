@@ -20,3 +20,31 @@ only need to read the stored standard LZMA-alone fixture.
 Different encoder versions may produce different valid compressed bytes. A fixture
 update must intentionally update the hash and re-run the real compatibility matrix.
 Never silently regenerate it during tests.
+
+## Linux v4.14.187 UART patch contexts
+
+`fixtures/linux-4.14.187/` contains exact upstream source fixtures from the
+Linux stable `v4.14.187` tag for:
+
+- `include/uapi/linux/serial_reg.h`
+- `drivers/tty/serial/8250/8250_dw.c`
+
+They are test inputs only. The regression suite copies them to a temporary
+directory and requires the RSD0614 UART patch to apply with `patch --fuzz=0`.
+This catches malformed hunks or upstream-context drift before a full OpenWrt
+compile. These files are never installed in the initramfs and never executed on
+the router.
+
+## OpenWrt RTL8197F UART patch-stack fixture
+
+`fixtures/openwrt-realtek/0004-rtl8197f-dw-uart.patch` is the exact base
+patch from the pinned OpenWrt source commit. The UART regression applies:
+
+1. upstream Linux `v4.14.187` `8250_dw.c`;
+2. the pinned OpenWrt Realtek `0004` patch with `--fuzz=0`;
+3. the local `9998-rtl8197f-uart-busy-replay.patch` with `--fuzz=0`.
+
+This models the actual OpenWrt patch order and prevents a patch that only applies
+to vanilla Linux from passing preflight. The fixture is test-only and is never
+installed in the firmware.
+

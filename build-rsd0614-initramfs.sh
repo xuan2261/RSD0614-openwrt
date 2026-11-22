@@ -55,6 +55,7 @@ STAGE=source_isolation; python3 "$PORT_DIR/harden_source.py" --tree "$OPENWRT_DI
 printf '%s\n' "$fingerprint" > "$WORK_DIR/.port-fingerprint"
 cp "$PORT_DIR/seed-rsd0614-initramfs.config" "$OPENWRT_DIR/.config"
 cd "$OPENWRT_DIR"; STAGE=defconfig; make defconfig; python3 "$PORT_DIR/check_config.py" .config; cp .config "$OUT_DIR/openwrt.config"
+STAGE=download; make download V=s
 STAGE=compile; make -j"$JOBS" V=s
 STAGE=build_evidence; python3 "$PORT_DIR/export_build_evidence.py" "$OPENWRT_DIR" "$OUT_DIR" --log "$OUT_DIR/build.log" --port-fingerprint "$fingerprint" --project-commit "$project_commit" --builder-image-id "$builder_image_id"
 STAGE=artifact_screen; TARGET="$OPENWRT_DIR/bin/targets/realtek/rtl8197f"

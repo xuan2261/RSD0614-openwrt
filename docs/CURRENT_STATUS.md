@@ -33,6 +33,7 @@ In `v5.4.1`, `rsd0614-survey probe-all` halted right after `smi` (`skipped_pinmu
 ## Verification boundary
 
 - v5.3.9 & v5.4.1 `ttyS0` shell, `spi0` `BH25Q64` read-only MTDs, passive `SYSC`/`PINMUX`/`GPIO`/`SWCORE` register survey, and `GPIO1_4` button on physical RSD0614 V1.0: **PASS (VERIFIED)**.
+- v5.4.2 CI OpenWrt compile & `deep_audit.py` (`27/27`): **PASS** (GitHub Actions run `#45087657332`, `2,934,544` bytes / `0x2CC710`, SHA-256 `ba761d13f34b492f220c599ec16e2747344f9169e0481edccba56214c73bbef2`).
 - v5.4.2 multi-bus `smi` + `wmac` + `pcie0` probes on physical RSD0614 V1.0 UART/runtime: **NOT YET VERIFIED**.
 - Disabled board peripherals (`ethernet` / `RTL8367RB`, `pcie0` / `RTL8814BR`, `wmac`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

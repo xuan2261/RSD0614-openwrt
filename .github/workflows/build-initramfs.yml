@@ -55,9 +55,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/rsd0614-openwrt-cache/seed
-          key: rsd0614-tc-v1-${{ hashFiles('Dockerfile', 'apt-bootstrap.sh', 'SOURCE_LOCK.json') }}-nogdb
+          key: rsd0614-tc-v1-${{ hashFiles('Dockerfile', 'apt-bootstrap.sh') }}-${{ hashFiles('SOURCE_LOCK.json', 'seed-rsd0614-initramfs.config') }}
           restore-keys: |
             rsd0614-tc-v1-${{ hashFiles('Dockerfile', 'apt-bootstrap.sh') }}-
+            rsd0614-tc-v1-
 
       - name: Load or build pinned builder image
         run: |

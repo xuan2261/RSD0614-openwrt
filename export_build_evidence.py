@@ -36,10 +36,10 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'proc_create("rsd0614_hw_survey", 0444, NULL, &rsd0614_hw_survey_fops)',
         '.write = NULL,',
         'proc_create("rsd0614_probe", 0600, NULL, &rsd0614_probe_fops)',
-        '(sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO',
-        '(cnr & RSD0614_SMI_PIN_MASK) != 0U',
-        '"skipped_pinmux_mismatch"',
-        'rsd0614_smi_write_reg(0x13C2U, 0x0249U)',
+        "if (*cmd == '\\0')",
+        'RSD0614_MDCIOCR_REG',
+        'RSD0614_PINMUX_SMI_GPIO',
+        '0x13C2U, 0x0249U',
         'orig_64 = sr_r32(REALTEK_SR_WLAN_EN);',
         'sr_w32(orig_64, REALTEK_SR_WLAN_EN);',
         'if ((ltssm & 0x1fU) == 0x11U)',
@@ -48,7 +48,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     ):
         if token not in surveytext:raise ValueError('RSD0614 omnibus survey/probe guard missing from compiled source: '+token)
     if 'while (1)' in surveytext:raise ValueError('Unbounded while (1) loop found in rsd0614_survey.c')
-    if 'smi_write_reg(0x1322' in surveytext:raise ValueError('Forbidden RTL8367 chip reset write found in rsd0614_survey.c')
+    if 'smi_write_reg(bus, 0x1322' in surveytext or 'mdio_8367_write_reg(phy_id, 0x1322' in surveytext:raise ValueError('Forbidden RTL8367 chip reset write found in rsd0614_survey.c')
     uartsrc=linux/'include/uapi/linux/serial_reg.h';uarttext=uartsrc.read_text()
     uart_required=(
         re.search(r'#define\s+UART_RX\s+0\b',uarttext) and

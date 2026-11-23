@@ -9,10 +9,10 @@ index 502ddb8..368dd6b 100644
 +obj-$(CONFIG_SOC_RTL8197F) += rsd0614_survey.o
 diff --git a/arch/mips/realtek/rsd0614_survey.c b/arch/mips/realtek/rsd0614_survey.c
 new file mode 100644
-index 0000000..621e43d
+index 0000000..d4aa2af
 --- /dev/null
 +++ b/arch/mips/realtek/rsd0614_survey.c
-@@ -0,0 +1,877 @@
+@@ -0,0 +1,1198 @@
 +// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
 +/*
 + * Rock Space RSD0614 V1.0 omnibus read-only hardware qualification driver.
@@ -25,14 +25,18 @@ index 0000000..621e43d
 + *      Performs zero hardware register writes.
 + *
 + *   2. /proc/rsd0614_probe (0600, never executed at boot):
-+ *      Mutex-serialized one-shot diagnostic probes accepting ONLY exact
-+ *      tokens "smi", "wmac", or "pcie0" (rejecting all other input with
-+ *      -EINVAL):
-+ *        - "smi": pinmux-guarded (PIN_MUX_SEL2[11:4]==0x66, PABCD_CNR[19:18]==0)
-+ *          spinlock-serialized 2-wire SMI read on PABCD bits 18 (SCK) & 19 (SDA)
-+ *          ONLY (never touching PEFGH or soft-reset 0x1322), unlocking 0x13c2=0x0249
-+ *          and reading RTL8367 chip ID/version/mode, RGMII/extif, pbmp, and port
-+ *          link status before restoring PABCD_DIR/PABCD_DAT bits 18..19.
++ *      Mutex-serialized one-shot diagnostic probes accepting exact tokens
++ *      "smi", "wmac", or "pcie0" (ignoring empty/whitespace-only writes from
++ *      split newline flushes and rejecting unknown tokens with -EINVAL):
++ *        - "smi": safe multi-bus RTL8367 discovery (never touching PH2 bit 26
++ *          hardware reset or 0x1322 soft-reset):
++ *            (a) SWCORE Clause-22 MDIO scan (phy 0..31 reg 2/3) + indirect
++ *                RTL8367 probe (phy 0, 29, PCRP0 ExtPHYID) via MDCIOCR/MDCIOSR;
++ *            (b) 2-wire SMI on PABCD bits 18/19 (C2/C3) with temporary
++ *                PIN_MUX_SEL2[11:4]=0x66 & PABCD_CNR[19:18]=0, unconditionally
++ *                restoring PABCD_DAT/DIR/CNR and PIN_MUX_SEL2 afterward;
++ *            (c) 2-wire SMI on PEFGH bits 23/24 (G7/H0) when PEFGH_CNR[24:23]
++ *                are already GPIO (0), restoring PEFGH_DAT/DIR bits 23..24.
 + *        - "wmac": keeps GIMR BIT(29) masked, saves SR+0x64, sets SR+0x64 |= 0x1f,
 + *          waits ~2 ms, reads WMAC +0x000/+0x004/+0x008/+0x0f0/+0x0fc/+0x100, and
 + *          restores SR+0x64.
@@ -87,12 +91,39 @@ index 0000000..621e43d
 +#define RSD0614_PABCD_DIR_REG		(RSD0614_GPIO_BASE + 0x08U)
 +#define RSD0614_PABCD_DAT_REG		(RSD0614_GPIO_BASE + 0x0CU)
 +
-+#define RSD0614_SMI_SCK_BIT		(1U << 18)
-+#define RSD0614_SMI_SDA_BIT		(1U << 19)
-+#define RSD0614_SMI_PIN_MASK		(RSD0614_SMI_SCK_BIT | RSD0614_SMI_SDA_BIT)
++#define RSD0614_PEFGH_CNR_REG		(RSD0614_GPIO_BASE + 0x1CU)
++#define RSD0614_PEFGH_DIR_REG		(RSD0614_GPIO_BASE + 0x24U)
++#define RSD0614_PEFGH_DAT_REG		(RSD0614_GPIO_BASE + 0x28U)
++
++#define RSD0614_SMI_C2_BIT		(1U << 18)
++#define RSD0614_SMI_C3_BIT		(1U << 19)
++#define RSD0614_SMI_PABCD_MASK		(RSD0614_SMI_C2_BIT | RSD0614_SMI_C3_BIT)
++
++#define RSD0614_SMI_G7_BIT		(1U << 23)
++#define RSD0614_SMI_H0_BIT		(1U << 24)
++#define RSD0614_SMI_PEFGH_MASK		(RSD0614_SMI_G7_BIT | RSD0614_SMI_H0_BIT)
++
 +#define RSD0614_SMI_CMD_WRITE		0xB8U
 +#define RSD0614_SMI_CMD_READ		0xB9U
 +#define RSD0614_SMI_ACK_RETRIES		5
++
++#define RSD0614_MDCIOCR_REG		(RSD0614_SWCORE_BASE + 0x4004U)
++#define RSD0614_MDCIOSR_REG		(RSD0614_SWCORE_BASE + 0x4008U)
++#define RSD0614_PCRP0_REG		(RSD0614_SWCORE_BASE + 0x4104U)
++#define RSD0614_MDCIOCR_WRITE		(1U << 31)
++#define RSD0614_MDCIOSR_BUSY		(1U << 31)
++#define RSD0614_MDIO_POLL_MAX		4096
++
++#define RSD0614_MDC_START_REG		29U
++#define RSD0614_MDC_CTRL0_REG		31U
++#define RSD0614_MDC_CTRL1_REG		21U
++#define RSD0614_MDC_ADDR_REG		23U
++#define RSD0614_MDC_DATA_WR_REG		24U
++#define RSD0614_MDC_DATA_RD_REG		25U
++#define RSD0614_MDC_START_OP		0xFFFFU
++#define RSD0614_MDC_ADDR_OP		0x000EU
++#define RSD0614_MDC_READ_OP		0x0001U
++#define RSD0614_MDC_WRITE_OP		0x0003U
 +
 +#ifndef RSD0614_SURVEY_SIM
 +static inline u32 rsd0614_kseg1_r32(u32 addr)
@@ -109,10 +140,23 @@ index 0000000..621e43d
 +static DEFINE_MUTEX(rsd0614_probe_lock);
 +static DEFINE_SPINLOCK(rsd0614_smi_lock);
 +
++struct rsd0614_smi_bus {
++	u32 dir_reg;
++	u32 dat_reg;
++	u32 sck_bit;
++	u32 sda_bit;
++};
++
 +struct rsd0614_smi_result {
 +	char status[32];
++	char bus_used[32];
 +	u32 pinmux_sel2;
 +	u32 pabcd_cnr;
++	u32 pefgh_cnr;
++	u32 mdio_phy_mask;
++	u32 mdio_first_phy;
++	u32 mdio_physid1;
++	u32 mdio_physid2;
 +	u32 chip_num;
 +	u32 chip_ver;
 +	u32 chip_mode;
@@ -155,7 +199,7 @@ index 0000000..621e43d
 +	u32 ep_subsys;
 +};
 +
-+static struct rsd0614_smi_result g_smi_res = { .status = "not_run" };
++static struct rsd0614_smi_result g_smi_res = { .status = "not_run", .bus_used = "none" };
 +static struct rsd0614_wmac_result g_wmac_res = { .status = "not_run" };
 +static struct rsd0614_pcie0_result g_pcie0_res = { .status = "not_run" };
 +
@@ -352,261 +396,528 @@ index 0000000..621e43d
 +	.write = NULL,
 +};
 +
-+/* --- Pinmux-guarded 2-wire SMI helpers (PABCD bits 18..19 ONLY) ---------- */
++/* --- SWCORE Clause-22 MDIO & 2-wire SMI multi-bus switch helpers --------- */
 +
-+static inline void rsd0614_smi_set_dir(u32 bit, bool output)
++static int rsd0614_mdio_wait_ready(u32 *status_out)
 +{
-+	u32 dir = rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG);
++	int i;
 +
-+	if (output)
-+		dir |= bit;
-+	else
-+		dir &= ~bit;
-+	rsd0614_kseg1_w32(dir, RSD0614_PABCD_DIR_REG);
++	for (i = 0; i < RSD0614_MDIO_POLL_MAX; i++) {
++		u32 st = rsd0614_kseg1_r32(RSD0614_MDCIOSR_REG);
++
++		if ((st & RSD0614_MDCIOSR_BUSY) == 0U) {
++			if (status_out)
++				*status_out = st;
++			return 0;
++		}
++		udelay(1);
++	}
++	return -ETIMEDOUT;
 +}
 +
-+static inline void rsd0614_smi_set_dat(u32 bit, bool high)
++static int rsd0614_mdio_c22_read(u32 phy_id, u32 reg_id, u32 *val)
 +{
-+	u32 dat = rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG);
++	u32 st = 0;
++	int ret;
++
++	ret = rsd0614_mdio_wait_ready(NULL);
++	if (ret)
++		return ret;
++	rsd0614_kseg1_w32(((phy_id & 0x1fU) << 24) | ((reg_id & 0x1fU) << 16),
++			  RSD0614_MDCIOCR_REG);
++	ret = rsd0614_mdio_wait_ready(&st);
++	if (ret)
++		return ret;
++	*val = st & 0xffffU;
++	return 0;
++}
++
++static int rsd0614_mdio_c22_write(u32 phy_id, u32 reg_id, u16 data)
++{
++	int ret;
++
++	ret = rsd0614_mdio_wait_ready(NULL);
++	if (ret)
++		return ret;
++	rsd0614_kseg1_w32(RSD0614_MDCIOCR_WRITE |
++			  ((phy_id & 0x1fU) << 24) |
++			  ((reg_id & 0x1fU) << 16) |
++			  (u32)data,
++			  RSD0614_MDCIOCR_REG);
++	return rsd0614_mdio_wait_ready(NULL);
++}
++
++static int rsd0614_mdio_8367_write_reg(u32 phy_id, u16 addr, u16 val)
++{
++	int ret;
++
++	ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_CTRL0_REG, RSD0614_MDC_ADDR_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_ADDR_REG, addr);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_DATA_WR_REG, val);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_CTRL1_REG, RSD0614_MDC_WRITE_OP);
++	return ret;
++}
++
++static int rsd0614_mdio_8367_read_reg(u32 phy_id, u16 addr, u32 *val)
++{
++	int ret;
++
++	ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_CTRL0_REG, RSD0614_MDC_ADDR_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_ADDR_REG, addr);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_CTRL1_REG, RSD0614_MDC_READ_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_write(phy_id, RSD0614_MDC_START_REG, RSD0614_MDC_START_OP);
++	if (!ret)
++		ret = rsd0614_mdio_c22_read(phy_id, RSD0614_MDC_DATA_RD_REG, val);
++	return ret;
++}
++
++static inline void rsd0614_smi_set_dir(const struct rsd0614_smi_bus *bus, u32 bits, bool output)
++{
++	u32 dir = rsd0614_kseg1_r32(bus->dir_reg);
++
++	if (output)
++		dir |= bits;
++	else
++		dir &= ~bits;
++	rsd0614_kseg1_w32(dir, bus->dir_reg);
++}
++
++static inline void rsd0614_smi_set_dat(const struct rsd0614_smi_bus *bus, u32 bit, bool high)
++{
++	u32 dat = rsd0614_kseg1_r32(bus->dat_reg);
 +
 +	if (high)
 +		dat |= bit;
 +	else
 +		dat &= ~bit;
-+	rsd0614_kseg1_w32(dat, RSD0614_PABCD_DAT_REG);
++	rsd0614_kseg1_w32(dat, bus->dat_reg);
 +}
 +
-+static inline u32 rsd0614_smi_get_sda(void)
++static inline u32 rsd0614_smi_get_sda(const struct rsd0614_smi_bus *bus)
 +{
-+	return (rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG) & RSD0614_SMI_SDA_BIT) ? 1U : 0U;
++	return (rsd0614_kseg1_r32(bus->dat_reg) & bus->sda_bit) ? 1U : 0U;
 +}
 +
-+static void rsd0614_smi_start(void)
++static void rsd0614_smi_start(const struct rsd0614_smi_bus *bus)
 +{
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
-+	rsd0614_smi_set_dir(RSD0614_SMI_SCK_BIT | RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, false);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, true);
++	rsd0614_smi_set_dir(bus, bus->sck_bit | bus->sda_bit, true);
 +	udelay(2);
 +
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +	udelay(2);
 +
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, false);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, true);
 +}
 +
-+static void rsd0614_smi_stop(void)
++static void rsd0614_smi_stop(const struct rsd0614_smi_bus *bus)
 +{
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, false);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, true);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +	udelay(2);
-+	rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +
-+	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, false);
-+	rsd0614_smi_set_dir(RSD0614_SMI_SCK_BIT, false);
++	rsd0614_smi_set_dir(bus, bus->sda_bit, false);
++	rsd0614_smi_set_dir(bus, bus->sck_bit, false);
 +}
 +
-+static void rsd0614_smi_write_bits(u32 data, unsigned int len)
++static void rsd0614_smi_write_bits(const struct rsd0614_smi_bus *bus, u32 data, unsigned int len)
 +{
 +	unsigned int i;
 +
-+	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dir(bus, bus->sda_bit, true);
 +	for (i = len; i > 0; i--) {
 +		udelay(2);
-+		rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT,
++		rsd0614_smi_set_dat(bus, bus->sda_bit,
 +				    (data & (1U << (i - 1U))) != 0U);
 +		udelay(2);
-+		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++		rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +		udelay(2);
-+		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++		rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +	}
 +}
 +
-+static void rsd0614_smi_read_bits(unsigned int len, u32 *data)
++static void rsd0614_smi_read_bits(const struct rsd0614_smi_bus *bus, unsigned int len, u32 *data)
 +{
 +	unsigned int i;
 +
-+	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, false);
++	rsd0614_smi_set_dir(bus, bus->sda_bit, false);
 +	*data = 0;
 +	for (i = len; i > 0; i--) {
 +		u32 bit;
 +
 +		udelay(2);
-+		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, true);
++		rsd0614_smi_set_dat(bus, bus->sck_bit, true);
 +		udelay(2);
-+		bit = rsd0614_smi_get_sda();
-+		rsd0614_smi_set_dat(RSD0614_SMI_SCK_BIT, false);
++		bit = rsd0614_smi_get_sda(bus);
++		rsd0614_smi_set_dat(bus, bus->sck_bit, false);
 +		*data |= (bit << (i - 1U));
 +	}
-+	rsd0614_smi_set_dat(RSD0614_SMI_SDA_BIT, false);
-+	rsd0614_smi_set_dir(RSD0614_SMI_SDA_BIT, true);
++	rsd0614_smi_set_dat(bus, bus->sda_bit, false);
++	rsd0614_smi_set_dir(bus, bus->sda_bit, true);
 +}
 +
-+static int rsd0614_smi_wait_ack(void)
++static int rsd0614_smi_wait_ack(const struct rsd0614_smi_bus *bus)
 +{
 +	int retry;
 +
 +	for (retry = 0; retry <= RSD0614_SMI_ACK_RETRIES; retry++) {
 +		u32 ack = 1;
 +
-+		rsd0614_smi_read_bits(1, &ack);
++		rsd0614_smi_read_bits(bus, 1, &ack);
 +		if (ack == 0)
 +			return 0;
 +	}
 +	return -ETIMEDOUT;
 +}
 +
-+static int rsd0614_smi_write_byte(u8 byte)
++static int rsd0614_smi_write_byte(const struct rsd0614_smi_bus *bus, u8 byte)
 +{
-+	rsd0614_smi_write_bits(byte, 8);
-+	return rsd0614_smi_wait_ack();
++	rsd0614_smi_write_bits(bus, byte, 8);
++	return rsd0614_smi_wait_ack(bus);
 +}
 +
-+static int rsd0614_smi_write_reg(u16 addr, u16 val)
++static int rsd0614_smi_write_reg(const struct rsd0614_smi_bus *bus, u16 addr, u16 val)
 +{
 +	unsigned long flags;
 +	int ret;
 +
 +	spin_lock_irqsave(&rsd0614_smi_lock, flags);
-+	rsd0614_smi_start();
-+	ret = rsd0614_smi_write_byte(RSD0614_SMI_CMD_WRITE);
++	rsd0614_smi_start(bus);
++	ret = rsd0614_smi_write_byte(bus, RSD0614_SMI_CMD_WRITE);
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)(addr & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)(addr & 0xffU));
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)((addr >> 8) & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)((addr >> 8) & 0xffU));
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)(val & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)(val & 0xffU));
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)((val >> 8) & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)((val >> 8) & 0xffU));
 +out:
-+	rsd0614_smi_stop();
++	rsd0614_smi_stop(bus);
 +	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
 +	return ret;
 +}
 +
-+static int rsd0614_smi_read_reg(u16 addr, u32 *val)
++static int rsd0614_smi_read_reg(const struct rsd0614_smi_bus *bus, u16 addr, u32 *val)
 +{
 +	unsigned long flags;
 +	u32 lo = 0, hi = 0;
 +	int ret;
 +
 +	spin_lock_irqsave(&rsd0614_smi_lock, flags);
-+	rsd0614_smi_start();
-+	ret = rsd0614_smi_write_byte(RSD0614_SMI_CMD_READ);
++	rsd0614_smi_start(bus);
++	ret = rsd0614_smi_write_byte(bus, RSD0614_SMI_CMD_READ);
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)(addr & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)(addr & 0xffU));
 +	if (ret)
 +		goto out;
-+	ret = rsd0614_smi_write_byte((u8)((addr >> 8) & 0xffU));
++	ret = rsd0614_smi_write_byte(bus, (u8)((addr >> 8) & 0xffU));
 +	if (ret)
 +		goto out;
-+	rsd0614_smi_read_bits(8, &lo);
-+	rsd0614_smi_write_bits(0x00U, 1);
-+	rsd0614_smi_read_bits(8, &hi);
-+	rsd0614_smi_write_bits(0x01U, 1);
++	rsd0614_smi_read_bits(bus, 8, &lo);
++	rsd0614_smi_write_bits(bus, 0x00U, 1);
++	rsd0614_smi_read_bits(bus, 8, &hi);
++	rsd0614_smi_write_bits(bus, 0x01U, 1);
 +	*val = (lo & 0xffU) | ((hi & 0xffU) << 8);
 +out:
-+	rsd0614_smi_stop();
++	rsd0614_smi_stop(bus);
 +	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++	return ret;
++}
++
++static int rsd0614_collect_8367_via_mdio(u32 phy_id)
++{
++	u32 chip = 0;
++	unsigned int p;
++	int ret;
++
++	ret = rsd0614_mdio_8367_write_reg(phy_id, 0x13C2U, 0x0249U);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1300U, &chip);
++	if (ret || chip == 0x0000U || chip == 0xffffU)
++		return -ENODEV;
++
++	g_smi_res.chip_num = chip;
++	ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1301U, &g_smi_res.chip_ver);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1302U, &g_smi_res.chip_mode);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1305U, &g_smi_res.dis);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1306U, &g_smi_res.ext0_rgmxf);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1307U, &g_smi_res.ext1_rgmxf);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1310U, &g_smi_res.di_force0);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1311U, &g_smi_res.di_force1);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1D11U, &g_smi_res.extif_1d11);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x1219U, &g_smi_res.cpu_mask_1219);
++	if (!ret)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, 0x121AU, &g_smi_res.cpu_ctrl_121a);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, (u16)(0x08A2U + p), &g_smi_res.pbmp[p]);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_mdio_8367_read_reg(phy_id, (u16)(0x1352U + p), &g_smi_res.port_status[p]);
++	return ret;
++}
++
++static int rsd0614_collect_8367_via_smi(const struct rsd0614_smi_bus *bus)
++{
++	u32 chip = 0;
++	unsigned int p;
++	int ret;
++
++	ret = rsd0614_smi_write_reg(bus, 0x13C2U, 0x0249U);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1300U, &chip);
++	if (ret || chip == 0x0000U || chip == 0xffffU)
++		return ret ? ret : -ENODEV;
++
++	g_smi_res.chip_num = chip;
++	ret = rsd0614_smi_read_reg(bus, 0x1301U, &g_smi_res.chip_ver);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1302U, &g_smi_res.chip_mode);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1305U, &g_smi_res.dis);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1306U, &g_smi_res.ext0_rgmxf);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1307U, &g_smi_res.ext1_rgmxf);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1310U, &g_smi_res.di_force0);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1311U, &g_smi_res.di_force1);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1D11U, &g_smi_res.extif_1d11);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x1219U, &g_smi_res.cpu_mask_1219);
++	if (!ret)
++		ret = rsd0614_smi_read_reg(bus, 0x121AU, &g_smi_res.cpu_ctrl_121a);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_smi_read_reg(bus, (u16)(0x08A2U + p), &g_smi_res.pbmp[p]);
++	for (p = 0; p < 8 && !ret; p++)
++		ret = rsd0614_smi_read_reg(bus, (u16)(0x1352U + p), &g_smi_res.port_status[p]);
 +	return ret;
 +}
 +
 +static void rsd0614_run_probe_smi(void)
 +{
 +	unsigned long flags;
-+	u32 sel2, cnr, orig_dir, orig_dat;
-+	unsigned int p;
-+	int ret;
++	u32 clkmanage, sel2, pabcd_cnr, pefgh_cnr;
++	u32 orig_dir, orig_dat;
++	int ret = -ENODEV;
 +
 +	memset(&g_smi_res, 0, sizeof(g_smi_res));
-+	sel2 = rsd0614_kseg1_r32(RSD0614_PINMUX_SEL2_REG);
-+	cnr = rsd0614_kseg1_r32(RSD0614_PABCD_CNR_REG);
-+	g_smi_res.pinmux_sel2 = sel2;
-+	g_smi_res.pabcd_cnr = cnr;
++	scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used), "%s", "none");
 +
-+	if ((sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO ||
-+	    (cnr & RSD0614_SMI_PIN_MASK) != 0U) {
-+		scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "skipped_pinmux_mismatch");
-+		pr_info("rsd0614-probe: smi skipped_pinmux_mismatch (sel2=0x%08x pabcd_cnr=0x%08x)\n",
-+			sel2, cnr);
-+		return;
++	clkmanage = rsd0614_kseg1_r32(RSD0614_SYSC_BASE + 0x10U);
++	sel2 = rsd0614_kseg1_r32(RSD0614_PINMUX_SEL2_REG);
++	pabcd_cnr = rsd0614_kseg1_r32(RSD0614_PABCD_CNR_REG);
++	pefgh_cnr = rsd0614_kseg1_r32(RSD0614_PEFGH_CNR_REG);
++	g_smi_res.pinmux_sel2 = sel2;
++	g_smi_res.pabcd_cnr = pabcd_cnr;
++	g_smi_res.pefgh_cnr = pefgh_cnr;
++	g_smi_res.mdio_first_phy = 0xffU;
++
++	/* 1. Try SWCORE Clause-22 MDIO scan + indirect RTL8367 access first. */
++	if ((clkmanage & BIT(11)) != 0U) {
++		u32 phy, pcrp0_phy;
++		u32 cand[3];
++		unsigned int c;
++
++		for (phy = 0; phy < 32U; phy++) {
++			u32 id1 = 0xffffU, id2 = 0xffffU;
++
++			if (rsd0614_mdio_c22_read(phy, 2U, &id1) == 0 &&
++			    id1 != 0xffffU && id1 != 0x0000U) {
++				(void)rsd0614_mdio_c22_read(phy, 3U, &id2);
++				g_smi_res.mdio_phy_mask |= (1U << phy);
++				if (g_smi_res.mdio_first_phy == 0xffU) {
++					g_smi_res.mdio_first_phy = phy;
++					g_smi_res.mdio_physid1 = id1;
++					g_smi_res.mdio_physid2 = id2;
++				}
++			}
++		}
++
++		pcrp0_phy = (rsd0614_kseg1_r32(RSD0614_PCRP0_REG) >> 24) & 0x1fU;
++		cand[0] = 0U;
++		cand[1] = 29U;
++		cand[2] = pcrp0_phy;
++		for (c = 0; c < 3U; c++) {
++			if (c > 0U && (cand[c] == cand[0] || (c == 2U && cand[2] == cand[1])))
++				continue;
++			if (rsd0614_collect_8367_via_mdio(cand[c]) == 0) {
++				scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used),
++					  "mdio_phy%u", cand[c]);
++				ret = 0;
++				goto done;
++			}
++		}
 +	}
 +
-+	orig_dir = rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG);
-+	orig_dat = rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG);
++	/* 2. Try 2-wire SMI on PABCD 18/19 (C2/C3), temporarily muxing SEL2=0x660
++	 *    if bootloader left P0MDC/P0MDIO muxed (0x0), then restoring 100%. */
++	{
++		static const struct rsd0614_smi_bus c2_c3 = {
++			.dir_reg = RSD0614_PABCD_DIR_REG,
++			.dat_reg = RSD0614_PABCD_DAT_REG,
++			.sck_bit = RSD0614_SMI_C2_BIT,
++			.sda_bit = RSD0614_SMI_C3_BIT,
++		};
++		static const struct rsd0614_smi_bus c3_c2 = {
++			.dir_reg = RSD0614_PABCD_DIR_REG,
++			.dat_reg = RSD0614_PABCD_DAT_REG,
++			.sck_bit = RSD0614_SMI_C3_BIT,
++			.sda_bit = RSD0614_SMI_C2_BIT,
++		};
++		bool need_mux = ((sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO) ||
++				((pabcd_cnr & RSD0614_SMI_PABCD_MASK) != 0U);
 +
-+	ret = rsd0614_smi_write_reg(0x13C2U, 0x0249U);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1300U, &g_smi_res.chip_num);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1301U, &g_smi_res.chip_ver);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1302U, &g_smi_res.chip_mode);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1305U, &g_smi_res.dis);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1306U, &g_smi_res.ext0_rgmxf);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1307U, &g_smi_res.ext1_rgmxf);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1310U, &g_smi_res.di_force0);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1311U, &g_smi_res.di_force1);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1D11U, &g_smi_res.extif_1d11);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x1219U, &g_smi_res.cpu_mask_1219);
-+	if (!ret)
-+		ret = rsd0614_smi_read_reg(0x121AU, &g_smi_res.cpu_ctrl_121a);
-+	for (p = 0; p < 8 && !ret; p++)
-+		ret = rsd0614_smi_read_reg((u16)(0x08A2U + p), &g_smi_res.pbmp[p]);
-+	for (p = 0; p < 8 && !ret; p++)
-+		ret = rsd0614_smi_read_reg((u16)(0x1352U + p), &g_smi_res.port_status[p]);
++		orig_dir = rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG);
++		orig_dat = rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG);
 +
-+	spin_lock_irqsave(&rsd0614_smi_lock, flags);
-+	rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG) & ~RSD0614_SMI_PIN_MASK) |
-+			  (orig_dat & RSD0614_SMI_PIN_MASK),
-+			  RSD0614_PABCD_DAT_REG);
-+	rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG) & ~RSD0614_SMI_PIN_MASK) |
-+			  (orig_dir & RSD0614_SMI_PIN_MASK),
-+			  RSD0614_PABCD_DIR_REG);
-+	spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++		if (need_mux) {
++			spin_lock_irqsave(&rsd0614_smi_lock, flags);
++			rsd0614_kseg1_w32((sel2 & ~RSD0614_PINMUX_SMI_MASK) | RSD0614_PINMUX_SMI_GPIO,
++					  RSD0614_PINMUX_SEL2_REG);
++			rsd0614_kseg1_w32(pabcd_cnr & ~RSD0614_SMI_PABCD_MASK,
++					  RSD0614_PABCD_CNR_REG);
++			spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++			udelay(10);
++		}
 +
++		ret = rsd0614_collect_8367_via_smi(&c2_c3);
++		if (!ret) {
++			scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used), "%s",
++				  need_mux ? "smi_pabcd_18_19_muxed" : "smi_pabcd_18_19");
++		} else {
++			ret = rsd0614_collect_8367_via_smi(&c3_c2);
++			if (!ret)
++				scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used), "%s",
++					  need_mux ? "smi_pabcd_19_18_muxed" : "smi_pabcd_19_18");
++		}
++
++		spin_lock_irqsave(&rsd0614_smi_lock, flags);
++		rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DAT_REG) & ~RSD0614_SMI_PABCD_MASK) |
++				  (orig_dat & RSD0614_SMI_PABCD_MASK),
++				  RSD0614_PABCD_DAT_REG);
++		rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PABCD_DIR_REG) & ~RSD0614_SMI_PABCD_MASK) |
++				  (orig_dir & RSD0614_SMI_PABCD_MASK),
++				  RSD0614_PABCD_DIR_REG);
++		if (need_mux) {
++			rsd0614_kseg1_w32(pabcd_cnr, RSD0614_PABCD_CNR_REG);
++			rsd0614_kseg1_w32(sel2, RSD0614_PINMUX_SEL2_REG);
++		}
++		spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++
++		if (!ret)
++			goto done;
++	}
++
++	/* 3. Try 2-wire SMI on PEFGH 23/24 (G7/H0) ONLY if already CNR=0 GPIO.
++	 *    Never touches bit 26 (PH2 = RTL8367 hardware reset). */
++	if ((pefgh_cnr & RSD0614_SMI_PEFGH_MASK) == 0U) {
++		static const struct rsd0614_smi_bus g7_h0 = {
++			.dir_reg = RSD0614_PEFGH_DIR_REG,
++			.dat_reg = RSD0614_PEFGH_DAT_REG,
++			.sck_bit = RSD0614_SMI_G7_BIT,
++			.sda_bit = RSD0614_SMI_H0_BIT,
++		};
++		static const struct rsd0614_smi_bus h0_g7 = {
++			.dir_reg = RSD0614_PEFGH_DIR_REG,
++			.dat_reg = RSD0614_PEFGH_DAT_REG,
++			.sck_bit = RSD0614_SMI_H0_BIT,
++			.sda_bit = RSD0614_SMI_G7_BIT,
++		};
++
++		orig_dir = rsd0614_kseg1_r32(RSD0614_PEFGH_DIR_REG);
++		orig_dat = rsd0614_kseg1_r32(RSD0614_PEFGH_DAT_REG);
++
++		ret = rsd0614_collect_8367_via_smi(&g7_h0);
++		if (!ret) {
++			scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used),
++				  "%s", "smi_pefgh_23_24");
++		} else {
++			ret = rsd0614_collect_8367_via_smi(&h0_g7);
++			if (!ret)
++				scnprintf(g_smi_res.bus_used, sizeof(g_smi_res.bus_used),
++					  "%s", "smi_pefgh_24_23");
++		}
++
++		spin_lock_irqsave(&rsd0614_smi_lock, flags);
++		rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PEFGH_DAT_REG) & ~RSD0614_SMI_PEFGH_MASK) |
++				  (orig_dat & RSD0614_SMI_PEFGH_MASK),
++				  RSD0614_PEFGH_DAT_REG);
++		rsd0614_kseg1_w32((rsd0614_kseg1_r32(RSD0614_PEFGH_DIR_REG) & ~RSD0614_SMI_PEFGH_MASK) |
++				  (orig_dir & RSD0614_SMI_PEFGH_MASK),
++				  RSD0614_PEFGH_DIR_REG);
++		spin_unlock_irqrestore(&rsd0614_smi_lock, flags);
++	}
++
++done:
 +	if (ret) {
-+		scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "ack_timeout");
-+		pr_warn("rsd0614-probe: smi ack_timeout (err=%d)\n", ret);
++		scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "no_ack_all_busses");
++		pr_warn("rsd0614-probe: smi no_ack_all_busses (mdio_mask=0x%08x sel2=0x%08x pabcd_cnr=0x%08x pefgh_cnr=0x%08x)\n",
++			g_smi_res.mdio_phy_mask, sel2, pabcd_cnr, pefgh_cnr);
 +		return;
 +	}
 +
 +	scnprintf(g_smi_res.status, sizeof(g_smi_res.status), "%s", "ok");
-+	pr_info("rsd0614-probe: smi ok num=0x%04x ver=0x%04x mode=0x%04x dis=0x%04x di1=0x%04x extif=0x%04x cpu_mask=0x%04x\n",
-+		g_smi_res.chip_num, g_smi_res.chip_ver, g_smi_res.chip_mode,
-+		g_smi_res.dis, g_smi_res.di_force1, g_smi_res.extif_1d11,
-+		g_smi_res.cpu_mask_1219);
++	pr_info("rsd0614-probe: smi ok bus=%s num=0x%04x ver=0x%04x mode=0x%04x dis=0x%04x di1=0x%04x extif=0x%04x cpu_mask=0x%04x\n",
++		g_smi_res.bus_used, g_smi_res.chip_num, g_smi_res.chip_ver,
++		g_smi_res.chip_mode, g_smi_res.dis, g_smi_res.di_force1,
++		g_smi_res.extif_1d11, g_smi_res.cpu_mask_1219);
 +}
 +
 +static void rsd0614_run_probe_wmac(void)
@@ -769,8 +1080,16 @@ index 0000000..621e43d
 +
 +	seq_printf(m, "SMI_STATUS=%s\n", g_smi_res.status);
 +	if (strcmp(g_smi_res.status, "not_run") != 0) {
++		seq_printf(m, "SMI_BUS=%s\n", g_smi_res.bus_used);
 +		seq_printf(m, "SMI_PINMUX_SEL2=0x%08x\n", g_smi_res.pinmux_sel2);
 +		seq_printf(m, "SMI_PABCD_CNR=0x%08x\n", g_smi_res.pabcd_cnr);
++		seq_printf(m, "SMI_PEFGH_CNR=0x%08x\n", g_smi_res.pefgh_cnr);
++		seq_printf(m, "SMI_MDIO_PHY_MASK=0x%08x\n", g_smi_res.mdio_phy_mask);
++		if (g_smi_res.mdio_first_phy != 0xffU) {
++			seq_printf(m, "SMI_MDIO_FIRST_PHY=%u\n", g_smi_res.mdio_first_phy);
++			seq_printf(m, "SMI_MDIO_PHYSID1=0x%04x\n", g_smi_res.mdio_physid1);
++			seq_printf(m, "SMI_MDIO_PHYSID2=0x%04x\n", g_smi_res.mdio_physid2);
++		}
 +	}
 +	if (strcmp(g_smi_res.status, "ok") == 0) {
 +		seq_printf(m, "SMI_CHIP_NUM=0x%04x\n", g_smi_res.chip_num);
@@ -850,6 +1169,8 @@ index 0000000..621e43d
 +		return -EFAULT;
 +	kbuf[count] = '\0';
 +	cmd = strim(kbuf);
++	if (*cmd == '\0')
++		return (ssize_t)count;
 +
 +	mutex_lock(&rsd0614_probe_lock);
 +	if (strcmp(cmd, "smi") == 0) {

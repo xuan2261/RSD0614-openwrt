@@ -7,29 +7,32 @@
 - SoC identity & crystal strap confirmed in hardware at runtime: `BOOTSTRAP = 81970001 0 41258ee0 80003800` (`soc_id = 0x81970001` **RTL8197FH-VG**, `0x41258ee0` `BIT(24)=1` **40 MHz XTAL**, `bits[18:15]=0xb` **1000 MHz CPU**, `BIT(5)=1` **DDR2-533**, `CLKMANAGE=0x80003800` `SWCORE` clock active).
 - **v5.3.9 (`v5.3.9-uart-soc-id-dispatch`) verified on physical Rock Space RSD0614 V1.0**:
   - `dw8250` runtime SoC-ID dispatch selected standard 16550/DW-APB mode (`soc_id=0x81970001 mode=vg-std tx_reg=0 rx_reg=0 adjlcr=0`).
-  - Bidirectional `ttyS0` (`16550A` at `0x18147000`, `irq = 17`) console and interactive BusyBox `ash` root shell verified (`/proc/interrupts` `17: 102 SOC 9 ttyS0`, `ERR: 0`).
+- **v5.4.1 (`v5.4.1-omnibus-readonly-survey`) passive & button survey verified on physical Rock Space RSD0614 V1.0**:
+  - Clean `ttyS0` boot without `keep_bootcon` (`MemTotal: 59540 kB`, `MemFree: 49252 kB`, `/proc/interrupts` `irq17=105`, `ERR=0`).
+  - `spi0` / `BH25Q64` (`m25p80 spi0.0: bh25q64 (8192 Kbytes)`, `div 28`) and all 6 read-only MTD partitions (`mtd0..mtd5`, `flags=0x800`, `writeable_bit_0x400=0`) verified; stock `mtd2ro` header verified as `cr6c` (`start_addr=0x80a00000`, `burn_addr=0x00030000`, `hdr_len=0x00256c02`).
+  - Package & mux/GPIO truth: `SYSC_BOND_OPTION=0x00000004` (`BSP_BOND_97FN`), `PINMUX_SEL2=0x00000000` & `GPIO_PABCD_CNR=0xffffffff` (bootloader uses hardware `P0MDC`/`P0MDIO` rather than pre-muxed GPIO SMI on `C2`/`C3`), `PINMUX_SEL13=0x33320000`, `PINMUX_SEL14=0x20000000` (`H2` = `RTL8367` reset held high in `GPIO_PEFGH_DAT=0x05c00013`), `PINMUX_SEL17=0x10110110`.
+  - Physical button verified on **`GPIO_PEFGH` bit 4 (`&gpio1 4 GPIO_ACTIVE_LOW`, `BSP_GPIO_PIN_E4`, `xor=0x00000010`)**.
+  - RGMII trunk on `SWCORE` Port 0 verified: `SWCORE_PITCR=0x00000001`, `SWCORE_P0GMIICR=0x00037d57` (`TX_delay=1`, **`RX_delay=7`**, CPU-tag bits off), `SWCORE_PCRP0=0x16972039` (`ExtPHYID=22`, `Pause=3`, `Force 1000M/FD`), `SWCORE_EXTPCR0=0x000c0000`, `PINMUX_RGMII_PAD_CTRL=0x579fff7f`, `SWCORE_PSRP0=0x0000307a`, `MIB_P0 <-> MIB_P6` = `5,731` frames (`0x318dd9` bytes, zero loss).
 
-## v5.4.1 scope — Omnibus Read-Only Hardware Qualification (`v5.4.1-omnibus-readonly-survey`)
+## v5.4.2 scope — Multi-Bus Switch Discovery + `wmac`/`pcie0` Completion (`v5.4.2-omnibus-readonly-survey`)
 
-To eliminate serial rebuild churn while upholding `AGENTS.md` (unverified peripherals disabled at boot; persistent flash `NO-GO`; zero device-unique secret leaks), `v5.4.1` combines build acceleration with an omnibus read-only qualification layer so **one RAM boot** collects all remaining target hardware facts:
-- **SPI NOR (`spi0` / `BH25Q64` `0x684017`)**: `keep_bootcon` retired; `&spi0` enabled at conservative single-lane `SPI_NOR_NO_FR | SPI_NOR_SKIP_SFDP` (`0x2008`, `spi-sheipa` `clk_div >= 28` + bounded CP0 WIP timeouts) across 6 `read-only;` MTD partitions (`mtd0..mtd5`), with `CONFIG_MTD_SPLIT_*` and `mount_root` suppressed.
-- **Passive Kernel Register Inspector (`/proc/rsd0614_hw_survey`, `0444`, `.write = NULL`)**: zero-write KSEG1 snapshot of `SYSC` (`SOC_ID`, decoded `BOOTSTRAP`, `BOND_OPTION`, `CLKMANAGE`, `ENABLE_IP`, `WLAN_CLK`, `MDIORST`), `MEMC` (`DMR`, `DCR`), `PIN_MUX_SEL0..18` + `RGMII_PAD_CTRL` (`0xB8000850`), `GICR`, `GPIO` `PABCD`/`PEFGH`, and `CLKMANAGE BIT(11)`-guarded `CPU_IFACE` + `SWCORE` (`PITCR`, `PCRP0..8`, `PSRP0..8`, `P0GMIICR`, `EXTPCR0`, and per-port MIB RX/TX counters).
-- **Opt-In Post-Survey One-Shot Probes (`/proc/rsd0614_probe`, `0600`, never run at boot)**:
-  - `smi`: pinmux-guarded (`PIN_MUX_SEL2[11:4]==0x66`, `PABCD_CNR[19:18]==0`) 2-wire SMI read on `PABCD` bits `18`/`19` ONLY (never touching `PEFGH` or reset `0x1322`), unlocking `0x13C2=0x0249` and reading `RTL8367` `chip_num`/`chip_ver`/`chip_mode`, `extif`/RGMII, `pbmp`, and per-port link status before restoring `PABCD` bits `18..19`.
-  - `wmac`: keeps `GIMR BIT(29)` masked, gates `SR+0x64 |= 0x1f`, reads `0xB8640000` (`+0x000..+0x100`, `cut`, `HAL type`), and restores `SR+0x64`.
-  - `pcie0`: keeps `GIMR BIT(21)` masked, runs donor 40 MHz RC0 reset + `SR+0x100` + `SR+0x50 BIT(1)` PERST#, polls `0xB8B00728` for `LTSSM == 0x11`, and reads `0xB8B10000` (`10ec:b814` `RTL8814BR`) **only** when `LTSSM == 0x11`.
-- **Sanitized Userspace Collector (`/usr/sbin/rsd0614-survey`)**: manual `passive`, `buttons [seconds]`, `probe-smi`, `probe-wmac`, `probe-pcie0`, `probe-all`, and `backup-guide` commands; reads structural headers from `/dev/mtd0ro` and `/dev/mtd2ro` ONLY while strictly redacting `mtd1` (`cfg`), `mtd3` (`cpe`), `mtd4` (`cfm`), and `mtd5` (`cfm_backup`).
+In `v5.4.1`, `rsd0614-survey probe-all` halted right after `smi` (`skipped_pinmux_mismatch`) because BusyBox `printf "%s\n"` flushed the trailing `\n` in a separate 1-byte `write()`, which `rsd0614_probe_write` rejected with `-EINVAL` under `set -e`. `v5.4.2` resolves all three findings in one fast cached build:
+- **Split-newline tolerance**: `/proc/rsd0614_probe` ignores empty/whitespace-only writes (`if (*cmd == '\0') return count;`) and `rsd0614-survey` writes tokens without trailing `\n`, so `probe-all` runs `smi` -> `wmac` -> `pcie0` end-to-end.
+- **Instant `cvimg` rootfs offset probe**: replaces the 140-second 8 MiB `hexdump` scan in `rsd0614-survey passive` with a `<0.05s` targeted check at `ALIGN(16 + hdr_len, 4)` and `4K`/`64K` boundaries.
+- **Safe 3-way `RTL8367` management bus auto-discovery (`smi`)**:
+  1. `SWCORE` Clause-22 MDIO scan (`phy 0..31` `reg 2/3`) + indirect `RTL8367` read (`phy 0, 29, PCRP0 ExtPHYID=22`) via `MDCIOCR`/`MDCIOSR` (`0xBB804004`/`0xBB804008`);
+  2. 2-wire SMI on `PABCD` `18/19` (`C2/C3`) with temporary `PINMUX_SEL2[11:4]=0x66` & `PABCD_CNR[19:18]=0`, unconditionally restoring `PABCD_DAT/DIR/CNR` and `PINMUX_SEL2` afterward;
+  3. 2-wire SMI on `PEFGH` `23/24` (`G7/H0`, already `CNR=0, DIR=IN, DAT=1`), restoring `PEFGH_DAT/DIR` bits `23..24` and never touching bit `26` (`PH2` hardware reset) or `0x1322`.
 
 ## Consolidated Roadmap (M1 -> M2 -> M3)
 
-1. **M1 (`v5.4.1` — this build)**: Run `rsd0614-survey passive`, `rsd0614-survey buttons 10`, and `rsd0614-survey probe-all` on physical RSD0614 V1.0 over UART (`AUTOBURN 0` RAM boot).
-2. **M2 (Functional RAM-boot router)**: Enable verified `&ethernet` (`rtl819x-eth` + `RTL8367RB` VLANs), verified GPIO buttons/LEDs, `&pcie0` 40 MHz bus enumeration, and 2.4 GHz `rtl8192cd` WMAC AP (with runtime read-only calibration from `/dev/mtd1ro`) in a single RAM-boot build.
-3. **M3 (`RTL8814BR` `10ec:b814` 5 GHz driver)**: Port/integrate `RTL8814B` (`10ec:b814`) driver support (absent from both pinned `ggbruno` `rtw88` and `ADCDS` `rtl8192cd` v3.4.11e).
+1. **M1b (`v5.4.2` — this build)**: Run `rsd0614-survey probe-all` (or `printf %s wmac > /proc/rsd0614_probe; printf %s pcie0 > /proc/rsd0614_probe` if `v5.4.1` is still live) to lock in `RTL8367` management bus + `WMAC` cut/HAL + `PCIe0` `10ec:b814` link-up.
+2. **M2 (Functional RAM-boot router)**: Enable `&ethernet` (preserving RSD0614's hardware-verified `P0GMIICR=0x00037d57` RX delay `7`, `EXTPCR0=0x000c0000`, `RGMII_PAD_CTRL=0x579fff7f` + `RTL8367RB` LAN `0..3` / WAN `4` VLANs), `&gpio1 4` button, `&pcie0` 40 MHz bus, and 2.4 GHz `WMAC` (`0x81970001` VG ID + `97FN` bond `0x4` + `/dev/mtd1ro` calibration) in one consolidated RAM-boot build.
+3. **M3 (`RTL8814BR` `10ec:b814` 5 GHz driver)**: Integrate `RTL8814B` (`10ec:b814`) driver support.
 
 ## Verification boundary
 
-- v5.3.9 serial-only RAM-boot & interactive `ttyS0` shell on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.4.1 CI compile & 27/27 offline policy audit (`run 45080096276` @ `961ee34`, `openwrt-realtek-rtl8197f-RSD0614-initramfs-kernel.bin`, `2,933,744` bytes / `0x2CC3F0`, SHA-256 `764aa670b9a0192a3a3a8d567f3830c5f9d2c7113e584757cc7805c110f82fe5`, `actions/cache@v4` builder/dl/toolchain caches populated) + warm local Docker build (`13m02s` on 2 vCPUs): **PASS (COMPILE/AUDIT ONLY)**.
-- v5.4.1 omnibus read-only qualification on physical RSD0614 V1.0 UART/runtime: **NOT YET VERIFIED**.
-- Disabled board peripherals (`ethernet` / `RTL8367RB`, `pcie0` / `RTL8814BR`, `wmac`, LEDs/buttons): **NOT YET VERIFIED**.
+- v5.3.9 & v5.4.1 `ttyS0` shell, `spi0` `BH25Q64` read-only MTDs, passive `SYSC`/`PINMUX`/`GPIO`/`SWCORE` register survey, and `GPIO1_4` button on physical RSD0614 V1.0: **PASS (VERIFIED)**.
+- v5.4.2 multi-bus `smi` + `wmac` + `pcie0` probes on physical RSD0614 V1.0 UART/runtime: **NOT YET VERIFIED**.
+- Disabled board peripherals (`ethernet` / `RTL8367RB`, `pcie0` / `RTL8814BR`, `wmac`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

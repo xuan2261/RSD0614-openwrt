@@ -62,6 +62,7 @@ typedef long ssize_t;
 #define BIT(nr) (1UL << (nr))
 #define EINVAL 22
 #define EFAULT 14
+#define ENODEV 19
 #define ETIMEDOUT 110
 
 #define REALTEK_SR_REG_ID 0x00
@@ -172,6 +173,29 @@ static int g_pefgh_writes;
 static int g_ep_cfg_reads;
 static int g_mdio_0f_writes;
 
+/* Switch bus simulation controls */
+static int g_mdio_8367_enabled;
+static u32 g_mdciosr = 0xffffU;
+static u16 g_mdio_ind_addr;
+static int g_c2c3_ack;
+static int g_g7h0_ack;
+static unsigned int g_smi_rx_clk;
+static unsigned int g_smi_byte_toggle;
+
+static u32 sim_smi_drive_sda(u32 raw_dat, u32 sda_bit) {
+    u8 resp;
+    unsigned int idx;
+    u32 bit;
+    if (g_smi_rx_clk == 0U)
+        return raw_dat | sda_bit;
+    resp = (g_smi_byte_toggle & 1U) ? 0x63U : 0x67U;
+    idx = (g_smi_rx_clk <= 8U) ? (g_smi_rx_clk - 1U) : 0U;
+    bit = (resp >> (7U - idx)) & 1U;
+    if (bit)
+        return raw_dat | sda_bit;
+    return raw_dat & ~sda_bit;
+}
+
 static u32 rsd0614_kseg1_r32(u32 addr) {
     if (addr >= 0xB8000000U && addr < 0xB8000200U) return g_sysc[(addr - 0xB8000000U) >> 2];
     if (addr >= 0xB8000800U && addr < 0xB8000880U) return g_pinmux[(addr - 0xB8000800U) >> 2];
@@ -179,9 +203,18 @@ static u32 rsd0614_kseg1_r32(u32 addr) {
     if (addr >= 0xB8003000U && addr < 0xB8003040U) return g_gicr[(addr - 0xB8003000U) >> 2];
     if (addr >= 0xB8003500U && addr < 0xB8003540U) {
         u32 v = g_gpio[(addr - 0xB8003500U) >> 2];
-        /* Simulate SMI ACK=0 when SDA (bit 19) is switched to input */
-        if (addr == 0xB800350CU && !(g_gpio[0x08 >> 2] & (1U << 19)))
-            return v & ~(1U << 19);
+        if (addr == 0xB800350CU && !(g_gpio[0x08 >> 2] & (1U << 19))) {
+            if (g_c2c3_ack &&
+                ((g_pinmux[0x08 >> 2] & 0x00000ff0U) == 0x00000660U) &&
+                ((g_gpio[0x00 >> 2] & ((1U << 18) | (1U << 19))) == 0U))
+                return sim_smi_drive_sda(v, 1U << 19);
+            return v | (1U << 19);
+        }
+        if (addr == 0xB8003528U && !(g_gpio[0x24 >> 2] & (1U << 24))) {
+            if (g_g7h0_ack && ((g_gpio[0x1C >> 2] & ((1U << 23) | (1U << 24))) == 0U))
+                return sim_smi_drive_sda(v, 1U << 24);
+            return v | (1U << 24);
+        }
         return v;
     }
     if (addr >= 0xB8010000U && addr < 0xB8010100U) { g_swcore_reads++; return g_cpu_iface[(addr - 0xB8010000U) >> 2]; }
@@ -189,6 +222,8 @@ static u32 rsd0614_kseg1_r32(u32 addr) {
     if (addr >= 0xB8B00000U && addr < 0xB8B00800U) return g_pcie_rc[(addr - 0xB8B00000U) >> 2];
     if (addr >= 0xB8B01000U && addr < 0xB8B01040U) return g_pcie_ext[(addr - 0xB8B01000U) >> 2];
     if (addr >= 0xB8B10000U && addr < 0xB8B10080U) { g_ep_cfg_reads++; return g_pcie_ep[(addr - 0xB8B10000U) >> 2]; }
+    if (addr == 0xBB804008U) { g_swcore_reads++; return g_mdciosr; }
+    if (addr == 0xBB804104U) { g_swcore_reads++; return 0x16972039U; }
     if (addr >= 0xBB800000U && addr < 0xBB806000U) { g_swcore_reads++; return 0x12345678U; }
     assert(!"unexpected KSEG1 read address");
     return 0;
@@ -197,9 +232,29 @@ static u32 rsd0614_kseg1_r32(u32 addr) {
 static void rsd0614_kseg1_w32(u32 val, u32 addr) {
     g_write_count++;
     if (addr >= 0xB8000000U && addr < 0xB8000200U) { g_sysc[(addr - 0xB8000000U) >> 2] = val; return; }
+    if (addr >= 0xB8000800U && addr < 0xB8000880U) { g_pinmux[(addr - 0xB8000800U) >> 2] = val; return; }
     if (addr >= 0xB8003000U && addr < 0xB8003040U) { g_gicr[(addr - 0xB8003000U) >> 2] = val; return; }
     if (addr >= 0xB8003500U && addr < 0xB8003540U) {
-        if (addr >= 0xB800351CU) g_pefgh_writes++;
+        u32 prev = g_gpio[(addr - 0xB8003500U) >> 2];
+        if (addr >= 0xB800351CU) {
+            g_pefgh_writes++;
+            /* Assert PH2 (bit 26 = RTL8367 hardware RESET#) is NEVER disturbed! */
+            assert((val & (1U << 26)) == (prev & (1U << 26)));
+        }
+        if (addr == 0xB8003508U && (prev & (1U << 19)) && !(val & (1U << 19))) {
+            g_smi_rx_clk = 0;
+        } else if (addr == 0xB800350CU && !(g_gpio[0x08 >> 2] & (1U << 19)) &&
+                   !(prev & (1U << 18)) && (val & (1U << 18))) {
+            g_smi_rx_clk++;
+            if (g_smi_rx_clk == 8U) g_smi_byte_toggle++;
+        }
+        if (addr == 0xB8003524U && (prev & (1U << 24)) && !(val & (1U << 24))) {
+            g_smi_rx_clk = 0;
+        } else if (addr == 0xB8003528U && !(g_gpio[0x24 >> 2] & (1U << 24)) &&
+                   !(prev & (1U << 23)) && (val & (1U << 23))) {
+            g_smi_rx_clk++;
+            if (g_smi_rx_clk == 8U) g_smi_byte_toggle++;
+        }
         g_gpio[(addr - 0xB8003500U) >> 2] = val;
         return;
     }
@@ -207,6 +262,24 @@ static void rsd0614_kseg1_w32(u32 val, u32 addr) {
         if (addr == 0xB8B01000U && (((val >> 8) & 0x1fU) == 0x0fU))
             g_mdio_0f_writes++;
         g_pcie_ext[(addr - 0xB8B01000U) >> 2] = val;
+        return;
+    }
+    if (addr == 0xBB804004U) {
+        u32 phy = (val >> 24) & 0x1fU;
+        u32 reg = (val >> 16) & 0x1fU;
+        u16 data = (u16)(val & 0xffffU);
+        if (val & BIT(31)) {
+            if (g_mdio_8367_enabled && phy == 0U && reg == 23U)
+                g_mdio_ind_addr = data;
+            g_mdciosr = 0U;
+        } else if (g_mdio_8367_enabled && phy == 0U) {
+            if (reg == 2U) g_mdciosr = 0x001cU;
+            else if (reg == 3U) g_mdciosr = 0xc942U;
+            else if (reg == 25U) g_mdciosr = (g_mdio_ind_addr == 0x1300U) ? 0x6367U : 0x0001U;
+            else g_mdciosr = 0xffffU;
+        } else {
+            g_mdciosr = 0xffffU;
+        }
         return;
     }
     assert(!"unexpected KSEG1 write address");
@@ -254,44 +327,83 @@ int main(void) {
     assert(g_swcore_reads > 0);
     assert(strstr(seq.buf, "SWCORE_PITCR=0x12345678\n") != NULL);
 
-    /* 4. Reject arbitrary /proc/rsd0614_probe inputs with -EINVAL and zero writes */
+    /* 4. Reject arbitrary inputs with -EINVAL while allowing trailing/split whitespace no-ops */
     assert(rsd0614_probe_write(&dummy_file, "reset\n", 6, &pos) == -EINVAL);
     assert(rsd0614_probe_write(&dummy_file, "pcie1\n", 6, &pos) == -EINVAL);
     assert(rsd0614_probe_write(&dummy_file, "", 0, &pos) == -EINVAL);
+    assert(rsd0614_probe_write(&dummy_file, "\n", 1, &pos) == 1);
+    assert(rsd0614_probe_write(&dummy_file, "  \n", 3, &pos) == 3);
     assert(g_write_count == 0);
 
-    /* 5. SMI probe skipped safely with ZERO writes when PIN_MUX_SEL2 mismatches */
-    g_pinmux[0x08 >> 2] = 0x00000110U;
-    g_gpio[0x00 >> 2] = 0x00000000U;
-    assert(rsd0614_probe_write(&dummy_file, "smi\n", 4, &pos) == 4);
-    assert(g_write_count == 0);
-    assert(strcmp(g_smi_res.status, "skipped_pinmux_mismatch") == 0);
+    /* 5. SMI probe via SWCORE Clause-22 MDIO (phy 0): zero GPIO/pinmux touches */
+    g_mdio_8367_enabled = 1;
+    g_c2c3_ack = 0;
+    g_g7h0_ack = 0;
+    g_pinmux[0x08 >> 2] = 0x00000000U;
+    g_gpio[0x00 >> 2] = 0xffffffffU;
+    g_gpio[0x1C >> 2] = 0xf83fffa5U;
+    g_gpio[0x24 >> 2] = 0x0640004aU; /* bit 26 (PH2) output */
+    g_gpio[0x28 >> 2] = 0x05c00013U; /* bit 26 (PH2) HIGH */
+    g_pefgh_writes = 0;
+    assert(rsd0614_probe_write(&dummy_file, "smi", 3, &pos) == 3);
+    assert(rsd0614_probe_write(&dummy_file, "\n", 1, &pos) == 1);
+    assert(strcmp(g_smi_res.status, "ok") == 0);
+    assert(strcmp(g_smi_res.bus_used, "mdio_phy0") == 0);
+    assert(g_smi_res.chip_num == 0x6367U);
+    assert(g_pefgh_writes == 0);
+    assert(g_pinmux[0x08 >> 2] == 0x00000000U);
+    assert(g_gpio[0x00 >> 2] == 0xffffffffU);
 
-    /* 6. SMI probe with valid pinmux: never touches PEFGH, restores PABCD bits 18..19 */
-    g_pinmux[0x08 >> 2] = 0x00000660U;
-    g_gpio[0x00 >> 2] = 0x00000000U;
+    /* 6. SMI probe via muxed PABCD 18/19 (starting from SEL2=0x0, CNR=0xffffffff):
+     *    temporarily muxes 0x660 and restores SEL2, CNR, DIR, DAT 100%, zero PEFGH touches */
+    g_mdio_8367_enabled = 0;
+    g_c2c3_ack = 1;
+    g_g7h0_ack = 0;
+    g_smi_byte_toggle = 0;
+    g_pinmux[0x08 >> 2] = 0x00000000U;
+    g_gpio[0x00 >> 2] = 0xffffffffU;
     g_gpio[0x08 >> 2] = 0xAAAA5555U; /* orig PABCD_DIR */
     g_gpio[0x0C >> 2] = 0x5555AAAAU; /* orig PABCD_DAT */
     g_pefgh_writes = 0;
     assert(rsd0614_probe_write(&dummy_file, "smi\n", 4, &pos) == 4);
     assert(strcmp(g_smi_res.status, "ok") == 0);
+    assert(strcmp(g_smi_res.bus_used, "smi_pabcd_18_19_muxed") == 0);
+    assert(g_smi_res.chip_num == 0x6367U);
     assert(g_pefgh_writes == 0);
+    assert(g_pinmux[0x08 >> 2] == 0x00000000U);
+    assert(g_gpio[0x00 >> 2] == 0xffffffffU);
     assert(g_gpio[0x08 >> 2] == 0xAAAA5555U);
     assert(g_gpio[0x0C >> 2] == 0x5555AAAAU);
 
-    /* 7. WMAC probe: saves/restores SR+0x64 and keeps GIMR BIT(29) masked */
+    /* 7. SMI probe via PEFGH 23/24 (G7/H0): never disturbs PH2 (bit 26), restores DIR & DAT */
+    g_mdio_8367_enabled = 0;
+    g_c2c3_ack = 0;
+    g_g7h0_ack = 1;
+    g_smi_byte_toggle = 0;
+    g_gpio[0x1C >> 2] = 0xf83fffa5U; /* bits 23..24 CNR == 0 */
+    g_gpio[0x24 >> 2] = 0x0640004aU; /* orig PEFGH_DIR (bit 26 = 1) */
+    g_gpio[0x28 >> 2] = 0x05c00013U; /* orig PEFGH_DAT (bit 26 = 1) */
+    assert(rsd0614_probe_write(&dummy_file, "smi", 3, &pos) == 3);
+    assert(strcmp(g_smi_res.status, "ok") == 0);
+    assert(strcmp(g_smi_res.bus_used, "smi_pefgh_23_24") == 0);
+    assert(g_smi_res.chip_num == 0x6367U);
+    assert(g_gpio[0x24 >> 2] == 0x0640004aU);
+    assert(g_gpio[0x28 >> 2] == 0x05c00013U);
+
+    /* 8. WMAC probe: saves/restores SR+0x64 and keeps GIMR BIT(29) masked */
     g_sysc[0x64 >> 2] = 0x00000000U;
     g_gicr[0x00 >> 2] = BIT(29); /* even if accidentally set, probe masks it */
     g_wmac[0x00 >> 2] = 0x12345678U;
     g_wmac[0xF0 >> 2] = 0x00002000U; /* cut = 2 */
     g_wmac[0xFC >> 2] = 0x0000000EU; /* hal_type = 14 */
-    assert(rsd0614_probe_write(&dummy_file, "wmac\n", 5, &pos) == 5);
+    assert(rsd0614_probe_write(&dummy_file, "wmac", 4, &pos) == 4);
+    assert(rsd0614_probe_write(&dummy_file, "\n", 1, &pos) == 1);
     assert(strcmp(g_wmac_res.status, "ok") == 0);
     assert(g_sysc[0x64 >> 2] == 0x00000000U);
     assert((g_gicr[0x00 >> 2] & BIT(29)) == 0U);
     assert(g_wmac_res.cut_ver == 2U && g_wmac_res.hal_type_id == 14U);
 
-    /* 8. PCIe0 probe with LTSSM != 0x11: NEVER reads 0xB8B10000! */
+    /* 9. PCIe0 probe with LTSSM != 0x11: NEVER reads 0xB8B10000! */
     g_pcie_rc[0x728 >> 2] = 0x00000002U;
     g_ep_cfg_reads = 0;
     g_mdio_0f_writes = 0;
@@ -300,13 +412,13 @@ int main(void) {
     assert(g_ep_cfg_reads == 0);
     assert(g_mdio_0f_writes == 1); /* 40 MHz MDIO table selected */
 
-    /* 9. PCIe0 probe with LTSSM == 0x11: reads 10ec:b814 cleanly */
+    /* 10. PCIe0 probe with LTSSM == 0x11: reads 10ec:b814 cleanly */
     g_pcie_rc[0x728 >> 2] = 0x00000011U;
     g_pcie_rc[0x000 >> 2] = 0x819710ecU;
     g_pcie_ep[0x000 >> 2] = 0xb81410ecU;
     g_pcie_ep[0x008 >> 2] = 0x02800000U;
     g_pcie_ep[0x02C >> 2] = 0xb81410ecU;
-    assert(rsd0614_probe_write(&dummy_file, "pcie0\n", 6, &pos) == 6);
+    assert(rsd0614_probe_write(&dummy_file, "pcie0", 5, &pos) == 5);
     assert(strcmp(g_pcie0_res.status, "link_up") == 0);
     assert(g_ep_cfg_reads == 3);
     assert((g_pcie0_res.ep_id & 0xffffU) == 0x10ecU);
@@ -814,14 +926,17 @@ class SourceTests(unittest.TestCase):
    'proc_create("rsd0614_hw_survey", 0444, NULL, &rsd0614_hw_survey_fops)',
    '.write = NULL,',
    'proc_create("rsd0614_probe", 0600, NULL, &rsd0614_probe_fops)',
-   '(sel2 & RSD0614_PINMUX_SMI_MASK) != RSD0614_PINMUX_SMI_GPIO',
-   '(cnr & RSD0614_SMI_PIN_MASK) != 0U',
+   "if (*cmd == '\\0')",
+   'RSD0614_MDCIOCR_REG',
+   'RSD0614_PINMUX_SMI_GPIO',
+   '0x13C2U, 0x0249U',
    'orig_64 = sr_r32(REALTEK_SR_WLAN_EN);',
    'sr_w32(orig_64, REALTEK_SR_WLAN_EN);',
    'if ((ltssm & 0x1fU) == 0x11U)',
   ):self.assertIn(token,stext)
   self.assertNotIn('while (1)',stext)
-  self.assertNotIn('smi_write_reg(0x1322',stext)
+  self.assertNotIn('write_reg(bus, 0x1322',stext)
+  self.assertNotIn('write_reg(phy_id, 0x1322',stext)
   with tempfile.TemporaryDirectory() as td:
    root=Path(td);(root/'arch/mips/realtek').mkdir(parents=True)
    (root/'arch/mips/realtek/rsd0614_survey.c').write_bytes(survey_bytes)
@@ -905,11 +1020,11 @@ class SourceTests(unittest.TestCase):
    wlen=value & 0x03
    return ((value & ~0x03)|(wlen-2)) if wlen in (2,3) else value
   self.assertEqual(translate(0x13),0x11);self.assertEqual(translate(0x83),0x81);self.assertEqual(translate(0x0b),0x09);self.assertEqual(translate(0x01),0x01)
- def test_builder_v541_volume_separate(self):
-  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v541-work',t);self.assertIn("-ne 'v5.4.1'",t);self.assertIn('rsd0614.work=v5.4.1',t)
-  for old_vol in ('rsd0614-openwrt-v540-work','rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
+ def test_builder_v542_volume_separate(self):
+  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v542-work',t);self.assertIn("-ne 'v5.4.2'",t);self.assertIn('rsd0614.work=v5.4.2',t)
+  for old_vol in ('rsd0614-openwrt-v541-work','rsd0614-openwrt-v540-work','rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
   self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
-  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v541-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.4.1');self.assertIn('rsd0614-openwrt-v540-work',hv['preserve_old_volumes'])
+  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v542-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.4.2');self.assertIn('rsd0614-openwrt-v541-work',hv['preserve_old_volumes'])
  def test_builder_ps1_captures_image_id_before_recording_and_env(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig')
   assign="$ImageId = (& docker image inspect $Image --format '{{.Id}}' | Out-String).Trim()"
@@ -933,10 +1048,10 @@ class SourceTests(unittest.TestCase):
    if actual!=digest:mismatch.append((rel,digest,actual))
   self.assertEqual(missing,[],f'missing manifest files: {missing}')
   self.assertEqual(mismatch,[],f'manifest hash drift: {mismatch}')
- def test_v541_metadata_and_provenance_wiring(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.4.1');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths and firmware MTD splitters suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent']);self.assertIn('enable spi0 with bounded spi-sheipa timeouts',lock['intent']);self.assertIn('/proc/rsd0614_hw_survey',lock['intent'])
-  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.4.1-omnibus-readonly-survey\n')
-  self.assertIn("b'v5.4.1-omnibus-readonly-survey\\n'",(ROOT/'deep_audit.py').read_text())
+ def test_v542_metadata_and_provenance_wiring(self):
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.4.2');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('direct NET/PCIe/WiFi IRQs masked',lock['intent']);self.assertIn('all enabled auto mount_root paths and firmware MTD splitters suppressed',lock['intent']);self.assertIn('default eth0/eth1 synthesis suppressed',lock['intent']);self.assertIn('realtek,rtl819x-sysc SoC ID',lock['intent']);self.assertIn('RTL8197FH-VG (0x81970000)',lock['intent']);self.assertIn('enable spi0 with bounded spi-sheipa timeouts',lock['intent']);self.assertIn('/proc/rsd0614_hw_survey',lock['intent'])
+  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.4.2-omnibus-readonly-survey\n')
+  self.assertIn("b'v5.4.2-omnibus-readonly-survey\\n'",(ROOT/'deep_audit.py').read_text())
   build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build)
   wrapper_raw=(ROOT/'Build-RSD0614.ps1').read_bytes();self.assertTrue(wrapper_raw.startswith(b'\xef\xbb\xbf'))
   wrapper=wrapper_raw.decode('utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)

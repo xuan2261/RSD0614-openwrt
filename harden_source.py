@@ -80,12 +80,28 @@ print_passive() {
 \t\t\t\tprintf "mtd2ro_fw_magic_hex=0x%s mtd2ro_fw_magic_ascii=%s start_addr=0x%s burn_addr=0x%s hdr_len=0x%s\\n", \\
 \t\t\t\t\tsig_hex, sig_ascii, substr(h, 9, 8), substr(h, 17, 8), substr(h, 25, 8)
 \t\t\t}'
-\t\t\tsq_info="$(hexdump -v -e '4/1 "%02x" "\\n"' /dev/mtd2ro 2>/dev/null | awk '
-\t\t\t\t$0 == "68737173" { printf "magic=hsqs offset=0x%x\\n", (NR - 1) * 4; found = 1; exit }
-\t\t\t\t$0 == "73717368" { printf "magic=sqsh offset=0x%x\\n", (NR - 1) * 4; found = 1; exit }
-\t\t\t\tEND { if (!found) print "magic=not_found offset=none" }
-\t\t\t')"
-\t\t\tprintf "mtd2ro_squashfs=%s\\n" "$sq_info"
+\t\t\tsq_info="$(printf "%s\\n" "$fw_hex" | awk '{
+\t\t\t\thex = "0123456789abcdef"
+\t\t\t\tlen = 0
+\t\t\t\tfor (i = 25; i <= 32; i++) {
+\t\t\t\t\tlen = len * 16 + (index(hex, tolower(substr($0, i, 1))) - 1)
+\t\t\t\t}
+\t\t\t\ttail_off = int((16 + len + 3) / 4) * 4
+\t\t\t\tprintf "%d\\n", tail_off
+\t\t\t}')"
+\t\t\tsq_found="magic=embedded_or_unaligned payload_end_offset=$(printf "0x%x" "$sq_info")"
+\t\t\tbase_4k=$(( (sq_info / 4096) * 4096 ))
+\t\t\tfor cand in "$sq_info" $(( sq_info + 4 )) "$base_4k" $(( base_4k + 4096 )) $(( base_4k + 8192 )) $(( (sq_info + 65535) / 65536 * 65536 )); do
+\t\t\t\t[ "$cand" -gt 0 ] || continue
+\t\t\t\tm4="$(dd if=/dev/mtd2ro bs=4 skip=$(( cand / 4 )) count=1 2>/dev/null | hexdump -v -e '4/1 "%02x" "\\n"' || true)"
+\t\t\t\tcase "$m4" in
+\t\t\t\t\t68737173) sq_found="$(printf "magic=hsqs offset=0x%x" "$cand")"; break ;;
+\t\t\t\t\t73717368) sq_found="$(printf "magic=sqsh offset=0x%x" "$cand")"; break ;;
+\t\t\t\t\t72366372) sq_found="$(printf "magic=r6cr offset=0x%x" "$cand")"; break ;;
+\t\t\t\t\t726f6f74) sq_found="$(printf "magic=root offset=0x%x" "$cand")"; break ;;
+\t\t\t\tesac
+\t\t\tdone
+\t\t\tprintf "mtd2ro_squashfs=%s\\n" "$sq_found"
 \t\telse
 \t\t\techo "mtd2ro_fw_header=unavailable"
 \t\tfi
@@ -166,7 +182,7 @@ run_probe() {
 \t}
 \tfor target in "$@"; do
 \t\techo "=== TRIGGER_PROBE: $target ==="
-\t\tprintf "%s\\n" "$target" > /proc/rsd0614_probe
+\t\tprintf "%s" "$target" > /proc/rsd0614_probe
 \tdone
 \techo "=== PROBE_RESULTS ==="
 \tcat /proc/rsd0614_probe
@@ -220,7 +236,7 @@ case "$cmd" in
 \t\t;;
 esac
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.4.1-omnibus-readonly-survey\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only diagnostic: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':'#!/bin/sh\n# Diagnostic image: no physical network interfaces.\nexit 0\n','etc/config/network':"config interface 'loopback'\n\toption device 'lo'\n\toption ifname 'lo'\n\toption proto 'static'\n\toption ipaddr '127.0.0.1'\n\toption netmask '255.0.0.0'\n",'etc/rc.local':'#!/bin/sh\n# No donor ASIC or Wi-Fi startup.\nexit 0\n','lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.4.2-omnibus-readonly-survey\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only diagnostic: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':'#!/bin/sh\n# Diagnostic image: no physical network interfaces.\nexit 0\n','etc/config/network':"config interface 'loopback'\n\toption device 'lo'\n\toption ifname 'lo'\n\toption proto 'static'\n\toption ipaddr '127.0.0.1'\n\toption netmask '255.0.0.0'\n",'etc/rc.local':'#!/bin/sh\n# No donor ASIC or Wi-Fi startup.\nexit 0\n','lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)

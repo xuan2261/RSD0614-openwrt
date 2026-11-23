@@ -1,9 +1,9 @@
 {
-  "version": "5.4.1-omnibus-readonly-survey",
-  "base": "5.4.0-spi-nor-readonly",
-  "change": "accelerate CI and local Linux OpenWrt builds via toolchain/dl seed caching and CONFIG_GDB disable, and add v5.4.1 omnibus read-only hardware qualification (/proc/rsd0614_hw_survey 0444, opt-in /proc/rsd0614_probe smi/wmac/pcie0, and sanitized on-demand usr/sbin/rsd0614-survey) while keeping PCIe/WMAC/Ethernet disabled at boot and persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v541-work",
-  "volume_label": "rsd0614.work=v5.4.1",
+  "version": "5.4.2-omnibus-readonly-survey",
+  "base": "5.4.1-omnibus-readonly-survey",
+  "change": "fix /proc/rsd0614_probe split-newline write handling so probe-all runs smi+wmac+pcie0 end-to-end, replace slow 8MiB SquashFS scan with instant cvimg payload-end probe, and upgrade smi probe to safe multi-bus RTL8367 auto-discovery (SWCORE Clause-22 MDIO + mux-restored PABCD C2/C3 SMI + PEFGH G7/H0 SMI) after v5.4.1 hardware survey proved PINMUX_SEL2=0x0, button GPIO1_4, and RGMII trunk P0GMIICR=0x00037d57",
+  "volume": "rsd0614-openwrt-v542-work",
+  "volume_label": "rsd0614.work=v5.4.2",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -15,7 +15,8 @@
     "rsd0614-openwrt-v537-work",
     "rsd0614-openwrt-v538-work",
     "rsd0614-openwrt-v539-work",
-    "rsd0614-openwrt-v540-work"
+    "rsd0614-openwrt-v540-work",
+    "rsd0614-openwrt-v541-work"
   ],
   "persistent_flash": "NO-GO"
 }

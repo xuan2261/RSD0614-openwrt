@@ -6,10 +6,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.4.1",
+  "bundle_version": "5.4.2",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "RAM-only omnibus read-only hardware qualification candidate (v5.4.1-omnibus-readonly-survey); clean ttyS0 console (keep_bootcon retired after v5.3.9 hardware verification); retain v5.3.9 runtime SoC-ID UART dispatch (realtek,rtl819x-sysc SoC ID -> RTL8197FH-VG (0x81970000) vg-std vs non-VG 0x8197F000); enable spi0 with bounded spi-sheipa timeouts and conservative single-lane BH25Q64 (0x684017) read profile across six strictly read-only MTD partitions; expose passive /proc/rsd0614_hw_survey (0444), opt-in /proc/rsd0614_probe (0600: smi, wmac, pcie0), and sanitized on-demand usr/sbin/rsd0614-survey; PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths and firmware MTD splitters suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "RAM-only omnibus read-only hardware qualification candidate (v5.4.2-omnibus-readonly-survey); clean ttyS0 console (keep_bootcon retired, hardware-verified in v5.4.1); retain v5.3.9 runtime SoC-ID UART dispatch (realtek,rtl819x-sysc SoC ID -> RTL8197FH-VG (0x81970000) vg-std vs non-VG 0x8197F000); enable spi0 with bounded spi-sheipa timeouts and conservative single-lane BH25Q64 (0x684017) read profile across six strictly read-only MTD partitions (hardware-verified in v5.4.1); expose passive /proc/rsd0614_hw_survey (0444), opt-in /proc/rsd0614_probe (0600: multi-bus MDIO/SMI smi, wmac, pcie0 with split-newline tolerance), and fast sanitized usr/sbin/rsd0614-survey; PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths and firmware MTD splitters suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
 }

@@ -18,14 +18,19 @@ The project has already verified on a physical RSD0614 unit:
   - Physical Reset button verified on **`GPIO_PEFGH` bit 4 (`&gpio1 4 GPIO_ACTIVE_LOW`, `BSP_GPIO_PIN_E4`, `xor=0x10`)**;
   - External switch verified as **`RTL8367S` (`chip_num=0x6367`, `ver=0x0020`, `EXT1=cpu_port 6`, LAN `0..3=0x00ef`, WAN `4=0x00f0`)** over bit-banged SMI **`SCK=&gpio1 24` (`PH0`), `SDA=&gpio1 23` (`PG7`)**, paired with live `SWCORE` Port 0 RGMII trunk (`P0GMIICR=0x00037d57` RX delay `7`, `RGMII_PAD_CTRL=0x579fff7f`, `EXTPCR0=0x000c0000`);
   - On-SoC 2.4 GHz WMAC verified alive as **`RTL8197G` (`HAL_HW_TYPE_ID=0x15`, `cut=1`)**;
-  - **v5.5.0** verified `PCIe0` (`10ec:b814` `RTL8814BR`, BAR0/BAR2 assigned), `RTL8367S` (`1000M/FD`, `VLAN 1: 4 6t`, `VLAN 2: 0 1 2 3 6t`, `5,781` pkts, `0` FCS errors), and RGMII trunk live on hardware, and isolated `eth0` `rx_pkts=0` to bootloader `CPUICR1=0x00186183` (new 6-dword single-level descriptor mode vs donor legacy 2-level rings);
-- the **v5.5.1 (`v5.5.1-vg-newdesc-ramboot`) M2 candidate** adds the native `RTL8197FH-VG` 6-dword new-descriptor RX/TX engine (`CPUICR1=0x001861d3`, `DMA_CR1`/`DMA_CR4`/`TXRINGCR`/`CPUQDM0`/`MACCTRL1`), runtime `desc_mode` A/B fallback, post-`TRXRDY` reg re-verification, and runout ISR storm guard (`9996-rsd0614-vg-rgmii-and-pcie.patch`, `NOT YET VERIFIED` on hardware), while **all 6 MTD partitions stay `read-only`, `pcie1` and `wmac` (`RTL8197G`) remain disabled, and persistent flash remains NO-GO**.
+- **v5.5.0 & v5.5.1 (`v5.5.1-vg-newdesc-ramboot`, CI run `#45379106697`) M2 wired Gigabit hardware-verified 100% on physical RSD0614 V1.0**:
+  - `PCIe0` (`10ec:b814` `RTL8814BR`, 40 MHz, BAR0/BAR2 assigned), `RTL8367S` (`1000M/FD`, `VLAN 1: 4 6t`, `VLAN 2: 0 1 2 3 6t`), and `RTL8197FH-VG` native 6-dword new-descriptor `eth0` (`newdesc=1`, `CPUICR1=0x001861d3`, `rx_pkts=107`, `runout=0`, `CPUIISR=00000000`, `FCS wedge detector armed`);
+  - `ping 192.168.1.1` (`4/4` replies, `1 ms`, `0%` loss) and Dropbear `ssh root@192.168.1.1` reached cleanly with zero kernel oops or errors;
+- the consolidated **v5.6.0 (`v5.6.0-m3-dualband-wifi-luci-ramboot`) M3 candidate** builds on top of the verified M2 wired Gigabit stack to deliver in a single RAM-boot image (`NOT YET VERIFIED` on hardware):
+  - **Dual-band Wi-Fi** via out-of-tree pinned Realtek SDK v3.6.0 `kmod-rtl8192cd-rsd0614` (`wlan0`: PCIe0 `RTL8814BR` 5 GHz 4x4 `VHT80` ch 36; `wlan1`: on-SoC `RTL8197G` `HAL 0x15` 2.4 GHz 2x2 `HT20` ch 6, WMAC `GIMR BIT(29)` armed on probe; WEXT + in-kernel WPA2-PSK; runtime read-only `/dev/mtd1` `"cfg"` calibration/MAC loader; atomic dual-band `netifd` handler);
+  - **OpenWrt 19.07 LuCI Web GUI** (`http://192.168.1.1` via `uhttpd` + pinned Lua-era `luci`/`packages` feeds) plus `wireless-tools`, `ethtool`, `iperf3`, and `rsd0614-survey wifi`;
+  - **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` remains disabled, unverified LED GPIOs remain unclaimed, and persistent flash remains **NO-GO**.
 
 ## Consolidated bring-up roadmap
 
 1. **M1 (`v5.3.9` -> `v5.4.2` — VERIFIED on physical RSD0614 V1.0)**: Clean `ttyS0` console, read-only `BH25Q64` MTDs, Reset button (`gpio1 4`), `RTL8367S` (`smi_pefgh_24_23`), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` `10ec:b814` Link UP.
-2. **M2 (`v5.5.1-vg-newdesc-ramboot` — current candidate, `PCIe0` + `RTL8367S` + RGMII trunk verified in `v5.5.0`; `eth0` 6-dword runtime `NOT YET VERIFIED`)**: Full Gigabit wired RAM-boot router (`RTL8367S` `switch0` + `RTL8197FH-VG` 6-dword NIC + LAN DHCP/SSH + WAN DHCP/NAT), Reset button, and 40 MHz `PCIe0` (`10ec:b814`) enumeration.
-3. **M3 (Dual-band Wi-Fi — future milestone)**: Integrate Realtek SDK v3.6.0 `rtl8192cd` driver/HAL covering BOTH on-SoC **`RTL8197G` (`HAL 0x15`, 2.4 GHz)** and PCIe0 **`RTL8814BR` (`10ec:b814`, `HAL 0x11`, 5 GHz)** with runtime read-only `/dev/mtd1ro` calibration in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
+2. **M2 (`v5.5.1-vg-newdesc-ramboot` — VERIFIED on physical RSD0614 V1.0)**: Full Gigabit wired RAM-boot router (`RTL8367S` `switch0` + `RTL8197FH-VG` 6-dword NIC + LAN `192.168.1.1` ping/SSH + `PCIe0` `10ec:b814` + Reset button).
+3. **M3 (`v5.6.0-m3-dualband-wifi-luci-ramboot` — current candidate, `NOT YET VERIFIED` on hardware)**: Full dual-band Wi-Fi (`RTL8814BR` 5 GHz + `RTL8197G` 2.4 GHz, read-only runtime `"cfg"` calibration) + LuCI 19.07 web UI + diagnostic/benchmark tools in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
 
 ## Safety contract
 
@@ -38,13 +43,13 @@ This repository is for **RAM-boot development only** at the current stage.
 
 ## Reproducible inputs
 
-Pinned upstream/donor revisions live in [`SOURCE_LOCK.json`](SOURCE_LOCK.json). The board-specific source is intentionally small and applied on top of the pinned donor/base trees during a build.
+Pinned upstream/donor revisions live in [`SOURCE_LOCK.json`](SOURCE_LOCK.json). The board-specific source is intentionally small and applied on top of the pinned donor/base/driver/feed trees during a build.
 
 ## Local Linux / Cloud VM + Windows Docker builds
 
 See [`docs/BUILD_LOCAL.md`](docs/BUILD_LOCAL.md).
 
-On Linux (with persistent `$HOME/.cache/rsd0614-openwrt` seed cache, ~5–6 min warm rebuilds on 2 vCPUs):
+On Linux (with persistent `$HOME/.cache/rsd0614-openwrt` seed cache, ~6–10 min warm rebuilds on 2 vCPUs):
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 run_tests.py
@@ -71,14 +76,15 @@ This repository is currently public. GitHub explicitly recommends against attach
 
 ## Repository layout
 
-- `RSD0614.dts` — M2 RAM-boot DTS (verified wired Gigabit + Reset button + 40 MHz PCIe0 + 6 read-only MTDs; `pcie1` and `wmac` disabled).
-- `seed-rsd0614-initramfs.config` — minimal initramfs configuration (`# CONFIG_GDB is not set`).
+- `RSD0614.dts` — M3 RAM-boot DTS (verified wired Gigabit + Reset button + 40 MHz PCIe0 + `RTL8197G` WMAC + 6 read-only MTDs; `pcie1` disabled).
+- `seed-rsd0614-initramfs.config` — initramfs configuration (`kmod-rtl8192cd-rsd0614`, LuCI 19.07 + `uhttpd`, `wireless-tools`, `ethtool`, `iperf3`; `# CONFIG_GDB is not set`).
+- `packages/rtl8192cd-rsd0614/Makefile` — out-of-tree pinned Realtek SDK v3.6.0 dual-band Wi-Fi kernel package.
 - `build-rsd0614-initramfs.sh` — pinned build orchestration inside Linux/Docker with opt-in `CACHE_DIR` toolchain/dl seed support.
 - `build-local-linux.sh` — local Linux / Cloud VM cached Docker build wrapper.
-- `harden_source.py` — donor-tree isolation, target hardening, M2 wired network config, and `usr/sbin/rsd0614-survey` staging.
-- `deep_audit.py` — binary/DTB/CPIO/SPI-NOR/network/survey offline audit.
+- `harden_source.py` — donor-tree isolation, target hardening, M3 wired + dual-band wireless `netifd`/UCI config, and `usr/sbin/rsd0614-survey` staging.
+- `deep_audit.py` — binary/DTB/CPIO/SPI-NOR/network/Wi-Fi/LuCI/survey offline audit.
 - `test_*.py` — regression suite.
-- `patches/` — target-specific kernel patches (`9996` VG RGMII/PCIe0, `9997` omnibus survey/probe, `9998*` UART, `9999` `BH25Q64`).
+- `patches/` — target-specific kernel and driver patches (`9996` VG RGMII/PCIe0, `9997` omnibus survey/probe, `9998*` UART, `9999` `BH25Q64`, `rtl8192cd-4.14-rsd0614.patch`).
 - `docs/` — current audit/build notes.
 
 ## License

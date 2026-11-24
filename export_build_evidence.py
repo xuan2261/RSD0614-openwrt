@@ -12,7 +12,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     active=dict(re.findall(r'^(CONFIG_\w+)=(.*)$',config,re.M))
     for key in DISABLE_KERNEL:
         if active.get(key) in ('y','m'):raise ValueError('Unwanted driver/splitter survived config merge: '+key)
-    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW','CONFIG_NET_RTL819X','CONFIG_RTL8366_SMI','CONFIG_RTL8367B_PHY','CONFIG_PCI'):
+    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW','CONFIG_NET_RTL819X','CONFIG_RTL8366_SMI','CONFIG_RTL8367B_PHY','CONFIG_PCI','CONFIG_WIRELESS','CONFIG_WIRELESS_EXT'):
         if active.get(key)!='y':raise ValueError('Required kernel feature missing: '+key)
     ethsrc=linux/'drivers/net/ethernet/rtl819x/rtl819x-eth.c'
     if not ethsrc.is_file():raise ValueError('Missing compiled rtl819x-eth.c: '+str(ethsrc))
@@ -80,7 +80,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         if token not in sheipatext:raise ValueError('Hardened bounded spi-sheipa guard missing from compiled source: '+token)
     if 'while (1) {' in sheipatext:raise ValueError('Unbounded polling loop survived in compiled spi-sheipa.c')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
-    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 M2 direct-IRQ mask hardening missing from compiled source')
+    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 M3 direct-IRQ mask hardening missing from compiled source')
     surveysrc=linux/'arch/mips/realtek/rsd0614_survey.c'
     if not surveysrc.is_file():raise ValueError('Missing compiled omnibus survey source: '+str(surveysrc))
     surveytext=surveysrc.read_text()
@@ -180,11 +180,25 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         ('if (!d->adjlcr || d->diag_dumped)','Stale !d->adjlcr IRQ diagnostic guard survived compiled source'),
     ):
         if forbidden in dwtext:raise ValueError(reason)
+    wifidir=linux.parent/'rtl8192cd-rsd0614'
+    wifiko=wifidir/'rtl8192cd.ko'
+    if not wifiko.is_file():raise ValueError('Missing compiled M3 rtl8192cd.ko: '+str(wifiko))
+    boardsrc=wifidir/'linux6/rtl8192cd_board.c';socsrc=wifidir/'linux6/rtl8197f_soc.c';compatsrc=wifidir/'rtl8197f_linux_compat.h'
+    for p in (boardsrc,socsrc,compatsrc):
+        if not p.is_file():raise ValueError('Missing compiled M3 Wi-Fi source evidence: '+str(p))
+    boardtext=boardsrc.read_text()
+    for token in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614'):
+        if token not in boardtext:raise ValueError('M3 read-only MTD cfg loader missing from compiled rtl8192cd_board.c: '+token)
+    for forbidden in ('mtd_write','mtd_erase','mtd_unlock'):
+        if forbidden in boardtext:raise ValueError('Forbidden flash write API in compiled rtl8192cd_board.c: '+forbidden)
+    soctext=socsrc.read_text()
+    for token in ('BIT(29)','0xB8003000','0xB8003004'):
+        if token not in soctext:raise ValueError('M3 WMAC GIMR BIT(29) guard missing from compiled rtl8197f_soc.c: '+token)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('rtl819x_swnic.c','drivers/net/ethernet/rtl819x/rtl819x_swnic.c'),('rtl819x_regs.h','drivers/net/ethernet/rtl819x/rtl819x_regs.h'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('rtl819x_swnic.c','drivers/net/ethernet/rtl819x/rtl819x_swnic.c'),('rtl819x_regs.h','drivers/net/ethernet/rtl819x/rtl819x_regs.h'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c'),('rtl8192cd_board.c','../rtl8192cd-rsd0614/linux6/rtl8192cd_board.c'),('rtl8197f_soc.c','../rtl8192cd-rsd0614/linux6/rtl8197f_soc.c'),('rtl8197f_linux_compat.h','../rtl8192cd-rsd0614/rtl8197f_linux_compat.h')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

@@ -1,9 +1,9 @@
 {
-  "version": "5.5.1-vg-newdesc-ramboot",
-  "base": "5.5.0-wired-pcie-ramboot",
-  "change": "M2 wired Gigabit completion for RTL8197FH-VG after v5.5.0 hardware verification proved PCIe0 (10ec:b814), RTL8367S (1000M/FD), and RGMII trunk (5781 pkts, 0 FCS errors) working while isolating eth0 rx_pkts=0 + CPUIISR=00020000 runout storm to bootloader CPUICR1=0x00186183 (new 6-dword descriptor mode vs legacy 2-level rings): implement native 6-dword (24-byte) single-level RX/TX engine (CPUICR1=0x001861d3, DMA_CR1=(txCnt-1)*24, DMA_CR4=TX_RING0_TAIL_AWARE, TXRINGCR=TX_RING0_EN, CPUQDM0/2/4=0, MACCTRL1|=CF_CMAC_CLK_SEL) with runtime desc_mode A/B fallback (0=legacy 0x82), post-TRXRDY reg re-verification, and runout ISR storm guard; keep all 6 MTD partitions read-only and wmac/pcie1 disabled until M3",
-  "volume": "rsd0614-openwrt-v551-work",
-  "volume_label": "rsd0614.work=v5.5.1",
+  "version": "5.6.0-m3-dualband-wifi-luci-ramboot",
+  "base": "5.5.1-vg-newdesc-ramboot",
+  "change": "Consolidated M3 RAM-boot build on top of hardware-verified v5.5.1 M2 wired Gigabit (ping 192.168.1.1 1ms 0% loss, Dropbear SSH reached, eth0 6-dword newdesc=1 rx_pkts=107 runout=0 CPUIISR=00000000): integrate out-of-tree pinned Realtek SDK v3.6.0 kmod-rtl8192cd-rsd0614 driving both PCIe0 RTL8814BR (5 GHz 4x4 VHT80 wlan0) and on-SoC RTL8197G (2.4 GHz 2x2 HT20 wlan1, WMAC enabled with GIMR BIT(29) armed on probe) via WEXT + in-kernel WPA2-PSK, read-only runtime /dev/mtd1 cfg calibration loader, atomic dual-band netifd handler, pinned OpenWrt 19.07 LuCI web GUI (uhttpd + luci), and wireless-tools/ethtool/iperf3; keep all 6 MTD partitions read-only, pcie1 disabled, unverified LEDs unclaimed, and persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v560-work",
+  "volume_label": "rsd0614.work=v5.6.0",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -18,7 +18,8 @@
     "rsd0614-openwrt-v540-work",
     "rsd0614-openwrt-v541-work",
     "rsd0614-openwrt-v542-work",
-    "rsd0614-openwrt-v550-work"
+    "rsd0614-openwrt-v550-work",
+    "rsd0614-openwrt-v551-work"
   ],
   "persistent_flash": "NO-GO"
 }

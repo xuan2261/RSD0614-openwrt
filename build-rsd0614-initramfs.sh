@@ -27,8 +27,11 @@ rm -f "$probe/A" "$probe/a"; rmdir "$probe"
 python3 "$PORT_DIR/run_tests.py"
 DONOR_COMMIT=229536d89c25a676417717304fcef386a53a7875
 BASE_COMMIT=8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67
-DONOR_DIR="$WORK_DIR/donor"; OPENWRT_DIR="$WORK_DIR/openwrt"
-fingerprint="$(cd "$PORT_DIR"; sha256sum RSD0614.dts seed-rsd0614-initramfs.config apply_rsd0614_profile.py harden_source.py patches/*.patch SOURCE_LOCK.json | sha256sum | cut -d' ' -f1)"
+WIFI_DRIVER_COMMIT=1529557b0936019462c4b24f98bc8436d359bd3a
+LUCI_COMMIT=f25285a6c26e8776f153994704710cb8e51fad91
+PACKAGES_COMMIT=6df6880800397ab3821572c6c5ad18e300374d9e
+DONOR_DIR="$WORK_DIR/donor"; OPENWRT_DIR="$WORK_DIR/openwrt"; WIFI_DIR="$WORK_DIR/wifi-driver"; LUCI_DIR="$WORK_DIR/feed-luci"; PACKAGES_DIR="$WORK_DIR/feed-packages"
+fingerprint="$(cd "$PORT_DIR"; sha256sum RSD0614.dts seed-rsd0614-initramfs.config apply_rsd0614_profile.py harden_source.py packages/rtl8192cd-rsd0614/Makefile patches/*.patch SOURCE_LOCK.json | sha256sum | cut -d' ' -f1)"
 project_commit="${PROJECT_COMMIT:-}"
 if [[ -z "$project_commit" ]]; then project_commit="$(git -C "$PORT_DIR" rev-parse HEAD 2>/dev/null || true)"; fi
 [[ -n "$project_commit" ]] || project_commit=NOT_AVAILABLE
@@ -52,6 +55,22 @@ STAGE=profile; python3 "$PORT_DIR/apply_rsd0614_profile.py" --repo "$DONOR_DIR" 
 STAGE=base_checkout; checkout_exact "$OPENWRT_DIR" https://github.com/ggbruno/openwrt "$BASE_COMMIT"
 cp -a "$DONOR_DIR/files/." "$OPENWRT_DIR/"
 STAGE=source_isolation; python3 "$PORT_DIR/harden_source.py" --tree "$OPENWRT_DIR" --port "$PORT_DIR" --audit "$WORK_DIR/source-audit" | tee "$OUT_DIR/SOURCE_HARDENING.txt"
+STAGE=wifi_driver_stage
+checkout_exact "$WIFI_DIR" https://github.com/tobyw121/Openwrt_RTL.git "$WIFI_DRIVER_COMMIT"
+rm -rf "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614"
+mkdir -p "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src"
+cp "$PORT_DIR/packages/rtl8192cd-rsd0614/Makefile" "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/Makefile"
+cp -a "$WIFI_DIR/package/kernel/rtl8192cd-rtl8197f/src/." "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src/"
+patch -d "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src" -p1 -F0 -i "$PORT_DIR/patches/rtl8192cd-4.14-rsd0614.patch"
+STAGE=feeds_stage
+checkout_exact "$LUCI_DIR" https://github.com/openwrt/luci.git "$LUCI_COMMIT"
+checkout_exact "$PACKAGES_DIR" https://github.com/openwrt/packages.git "$PACKAGES_COMMIT"
+printf 'src-link luci %s\nsrc-link packages %s\n' "$LUCI_DIR" "$PACKAGES_DIR" > "$OPENWRT_DIR/feeds.conf"
+(
+    cd "$OPENWRT_DIR"
+    ./scripts/feeds update luci packages
+    ./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap luci-app-firewall luci-proto-ppp cgi-io
+)
 printf '%s\n' "$fingerprint" > "$WORK_DIR/.port-fingerprint"
 zst_decompress() {
     local src=$1
@@ -206,7 +225,7 @@ STAGE=deep_offline_audit; python3 "$PORT_DIR/deep_audit.py" "$OUT_DIR/$(basename
 cp "$PORT_DIR/SOURCE_LOCK.json" "$OUT_DIR/"
 if [[ -r /opt/rsd0614/builder-packages.tsv ]]; then cp /opt/rsd0614/builder-packages.tsv "$OUT_DIR/"; fi
 {
- echo 'COMPILE=PASS'; echo 'ARTIFACT_SCREEN=PASS'; echo 'OFFLINE_STRUCTURAL_AUDIT=PASS'; echo 'BOOT_QUALIFICATION=NOT_YET_VERIFIED'; echo 'RAM_BOOT_AUTHORIZED=NO'; echo "donor_commit=$DONOR_COMMIT"; echo "base_commit=$BASE_COMMIT"; echo "port_input_fingerprint=$fingerprint"; echo "project_commit=$project_commit"; echo "builder_image_id=$builder_image_id"; sha256sum "$OUT_DIR/$(basename "$IMAGE")"; stat -c 'size=%s' "$OUT_DIR/$(basename "$IMAGE")";
+ echo 'COMPILE=PASS'; echo 'ARTIFACT_SCREEN=PASS'; echo 'OFFLINE_STRUCTURAL_AUDIT=PASS'; echo 'BOOT_QUALIFICATION=NOT_YET_VERIFIED'; echo 'RAM_BOOT_AUTHORIZED=NO'; echo "donor_commit=$DONOR_COMMIT"; echo "base_commit=$BASE_COMMIT"; echo "wifi_driver_commit=$WIFI_DRIVER_COMMIT"; echo "luci_commit=$LUCI_COMMIT"; echo "packages_commit=$PACKAGES_COMMIT"; echo "port_input_fingerprint=$fingerprint"; echo "project_commit=$project_commit"; echo "builder_image_id=$builder_image_id"; sha256sum "$OUT_DIR/$(basename "$IMAGE")"; stat -c 'size=%s' "$OUT_DIR/$(basename "$IMAGE")";
 } > "$OUT_DIR/BUILD_RESULT.txt"
 STAGE=finished_candidate_requires_review
 echo 'COMPILE FINISHED. Candidate requires binary review; do not load or execute it on the router.'

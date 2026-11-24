@@ -22,8 +22,8 @@ def validate(text: str) -> None:
                 raise ValueError(f'Additional filesystem output enabled: {key}')
         if key.startswith('CONFIG_PACKAGE_'):
             package = key[len('CONFIG_PACKAGE_'):]
-            if package.startswith(('kmod-rtw', 'kmod-rtl8192cd', 'rtl8822be-firmware', 'wpad', 'hostapd', 'luci')):
-                raise ValueError(f'Donor Wi-Fi/LuCI package selected: {key}={value}')
+            if package == 'kmod-rtl8192cd' or package.startswith(('kmod-rtw', 'rtl8822be-firmware', 'wpad', 'hostapd')):
+                raise ValueError(f'Incompatible donor Wi-Fi package selected: {key}={value}')
 
 if __name__ == '__main__':
     try:
@@ -33,4 +33,4 @@ if __name__ == '__main__':
     except (OSError, ValueError) as exc:
         print(f'CONFIG FAIL: {exc}')
         raise SystemExit(1)
-    print('CONFIG PASS: RSD0614-only initramfs; no selected donor Wi-Fi/LuCI package')
+    print('CONFIG PASS: RSD0614-only initramfs; no incompatible donor Wi-Fi package')

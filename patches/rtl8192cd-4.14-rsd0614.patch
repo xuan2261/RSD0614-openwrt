@@ -1,0 +1,729 @@
+diff --git a/8192cd_comapi.c b/8192cd_comapi.c
+index cce51db..317cdac 100755
+--- a/8192cd_comapi.c
++++ b/8192cd_comapi.c
+@@ -512,10 +512,10 @@ int rtl_wx_get_sens(struct net_device *dev,
+ void clean_conn_var(RTL_PRIV *priv)
+ {
+   	if (mw5_legacy_timer_pending(&priv->reauth_timer))
+-		del_timer_sync (&priv->reauth_timer);
++		mw5_legacy_del_timer_sync(&priv->reauth_timer);
+ 
+ 	if (mw5_legacy_timer_pending(&priv->reassoc_timer))
+-		del_timer_sync (&priv->reassoc_timer);
++		mw5_legacy_del_timer_sync(&priv->reassoc_timer);
+ #if 0
+ 	priv->reauth_count = 0;
+ 	priv->reassoc_count = 0;
+@@ -3620,24 +3620,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
+ 	int ret = 0;
+ 
+ 	oldfs = get_fs();
+-	set_fs(get_ds());
++	set_fs(KERNEL_DS);
+ 	fp = filp_open(CFG_FILE_PATH, O_RDONLY, 0);
+ 	if(IS_ERR(fp)) {
+ 		ret = PTR_ERR(fp);
+ 		printk("Fail to open configuration file. (%d)\n", ret);
+ 		goto err_exit;
+ 	}
+-	
+-	if (!(fp->f_op && fp->f_op->read)) {
+-		printk("Fail to support file ops: read\n");
+-		ret = -1;
+-		goto err_close;
+-	}
+-	
+-	if ((ret = fp->f_op->read(fp, buf, MAX_CONFIG_FILE_SIZE, &fp->f_pos))< 0){
++
++	if ((ret = kernel_read(fp, buf, MAX_CONFIG_FILE_SIZE - 1, &fp->f_pos)) < 0) {
+ 		printk("Fail to read file. (%d)\n", ret);
+ 		goto err_close;
+ 	}
++	buf[ret] = '\0';
+ 
+ err_close:
+ 	filp_close(fp, NULL);
+@@ -3748,6 +3743,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ #ifdef VENDOR_PARAM_COMPATIBLE	
+ 		/* To compatible with other vendor's parameters, each parameter must have its own process function - chris*/
+ 		loc = strchr(mibstart, '=');
++		if (!loc)
++			continue;
+ 		miblen = (u32)loc - (u32)mibstart;
+ 		vallen = len - miblen -1;
+ 		if (vallen>0) {			
+@@ -3770,6 +3767,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ 			continue;
+ 		
+ 		loc = strchr(mibstart, '=');
++		if (!loc)
++			continue;
+ 		miblen = (u32)loc - (u32)mibstart;
+ 		vallen = len - (strlen(dev->name)+1) - (miblen+1);
+ 		
+diff --git a/8192cd_host.c b/8192cd_host.c
+index 4790ff5..7165275 100755
+--- a/8192cd_host.c
++++ b/8192cd_host.c
+@@ -2316,6 +2316,12 @@ static int PCIE_Check_Link_97F(unsigned int portnum)
+ 
+  int PCIE_reset_procedure_97F(unsigned int PCIeIdx, unsigned int mdioReset)
+ {
++#ifdef CONFIG_RTL8192CD_LINUX6_BUS
++	unsigned int dbg = REG32(0xb8b00728);
++	pr_warn("rtl8192cd: PCIE_reset_procedure_97F(%u,%u) skipped under Linux bus ownership (LTSSM=0x%08x)\n",
++		PCIeIdx, mdioReset, dbg);
++	return ((dbg & 0x1fU) == 0x11U) ? 1 : 0;
++#else
+ 	int result=0;
+ 
+ 	// Turn On PCIE IP
+@@ -2353,6 +2359,7 @@ static int PCIE_Check_Link_97F(unsigned int portnum)
+ 	result = PCIE_Check_Link_97F(PCIeIdx);
+ 
+ 	return result;
++#endif
+ }
+ 
+ #endif
+diff --git a/8192cd_ioctl.c b/8192cd_ioctl.c
+index 9768da7..f77d4c6 100755
+--- a/8192cd_ioctl.c
++++ b/8192cd_ioctl.c
+@@ -16623,7 +16623,11 @@ int rtl8192cd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+ #ifdef __OSK__
+ #define VERIFY_WRITE 1
+ #endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+ 			ret = access_ok((void __user *)wrq->u.data.pointer, sizeof(privtab));
++#else
++			ret = access_ok(VERIFY_WRITE, (void __user *)wrq->u.data.pointer, sizeof(privtab));
++#endif
+ 			if (!ret) {
+ 				ret = -EFAULT;
+ 				DEBUG_ERR("user space valid check error!\n");
+@@ -20157,7 +20161,7 @@ case SIOC_SHIFT_POWER_INDEX:
+ 	}
+ #endif
+ 
+-#if defined(GENERAL_EVENT)
++#if defined(GENERAL_EVENT) && !defined(CONFIG_RTL_COMAPI_WLTOOLS)
+ 	case SIOCSIWRTLSETGENERALPID:
+ 	{
+ 		priv->pshare->wlangeneral_pid= -1;
+diff --git a/8192cd_osdep.c b/8192cd_osdep.c
+index 90c8937..57b2ea3 100755
+--- a/8192cd_osdep.c
++++ b/8192cd_osdep.c
+@@ -10916,8 +10916,8 @@ do_hw_init:
+ 
+ 		if (rc && ++init_hw_cnt < 5) {
+ #ifdef CONFIG_RTL8192CD_LINUX6_BUS
+-#ifdef CONFIG_WLAN_HAL_8197F
+-			if (GET_CHIP_VER(priv) == VERSION_8197F) {
++#if defined(CONFIG_WLAN_HAL_8197F) || defined(CONFIG_WLAN_HAL_8197G)
++			if (GET_CHIP_VER(priv) == VERSION_8197F || GET_CHIP_VER(priv) == VERSION_8197G) {
+ 				unsigned int gate_retry = REG32(0xB8000064);
+ 				REG32(0xB8000064) = gate_retry & ~0x1fU;
+ 				(void)REG32(0xB8000064);
+@@ -13222,8 +13222,17 @@ int rtl8192cd_close(struct net_device *dev)
+ 
+ #ifdef CONFIG_WLAN_HAL_8197G
+ 	if (IS_ROOT_INTERFACE(priv) && (GET_CHIP_VER(priv)==VERSION_8197G)) {
+-        //TODO
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS)
+         REG32(0xB8000064)= 0x00; //yllin8197G
++#else
++		{
++			unsigned int gate_before = REG32(0xB8000064);
++			REG32(0xB8000064) = gate_before & ~0x1fU;
++			(void)REG32(0xB8000064);
++			mdelay(1);
++			priv->pshare->linux6_soc_wlan_gate = REG32(0xB8000064);
++		}
++#endif
+ 	}
+ #endif //CONFIG_WLAN_HAL_8197G
+ 
+@@ -14496,7 +14505,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
+         .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
+ #endif
+         .ndo_get_stats          = rtl8192cd_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = rtl8192cd_start_xmit,
+@@ -14524,7 +14533,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
+         .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
+ #endif
+         .ndo_get_stats          = rtl8192cd_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = rtl8192cd_start_xmit,
+@@ -14546,7 +14555,7 @@ static const struct net_device_ops mesh_netdev_ops = {
+         .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
+ #endif
+         .ndo_get_stats          = rtl8192cd_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = mesh_start_xmit,
+@@ -16781,9 +16790,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
+ 			priv->pshare->linux6_radio_index = wdev->radio_index;
+ 			priv->pshare->linux6_root_priv = priv;
+ 			skb_queue_head_init(&priv->pshare->linux6_rx_delivery);
++#ifdef RTK_NL80211
+ 			INIT_LIST_HEAD(&priv->pshare->cfg80211_queue);
+ 			priv->pshare->cfg80211_queue_len = 0;
+ 			INIT_WORK(&priv->pshare->cfg80211_work, realtek_process_cfg80211_work);
++#endif
+ 			rtl8197f_wlan_phase_set(716, "probe-napi-add-entry", 0);
+ 			netif_napi_add_weight(dev, &priv->pshare->linux6_rx_napi,
+ 					rtl8192cd_linux6_napi_poll, 64);
+@@ -18146,6 +18157,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+ 	}
+ #ifdef CONFIG_RTL8192CD_LINUX6_BUS
+ linux6_irq_ready:
++	;
+ #endif
+ 
+ #ifdef CONFIG_PUMA_UDMA_SUPPORT
+@@ -20452,7 +20464,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
+         .ndo_stop               = rtl8192cd_close,
+         .ndo_set_mac_address    = rtl_pseudo_dev_set_hwaddr,
+         .ndo_get_stats          = rtl8192cd_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = rtl8192cd_start_xmit,
+@@ -20530,7 +20542,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
+ #endif
+ #endif
+         .ndo_get_stats          = rtl8192cd_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = rtl8192cd_start_xmit,
+@@ -22818,7 +22830,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
+ #endif
+ #endif
+         .ndo_get_stats          = rtl8192cd_vdev_get_stats,
+-#ifndef CONFIG_RTL8192CD_LINUX6_BUS
++#if !defined(CONFIG_RTL8192CD_LINUX6_BUS) || defined(CONFIG_MW5_LEGACY_WEXT)
+         .ndo_do_ioctl           = rtl8192cd_ioctl,
+ #endif
+         .ndo_start_xmit         = rtl8192cd_start_xmit,
+diff --git a/8192cd_rx.c b/8192cd_rx.c
+index f5ac923..bd7ef76 100755
+--- a/8192cd_rx.c
++++ b/8192cd_rx.c
+@@ -4912,6 +4912,8 @@ void rtl8192cd_dsr_rxq(unsigned long data)
+ dsr_rxq_end:
+ #ifdef WIFI_RX_PROCESS_ALL_QUEUE_OFFLOAD
+ 	rtk_tasklet_clear_triggered(&(priv->pshare->rxq_tasklet));
++#else
++	;
+ #endif
+ }
+ 
+diff --git a/Makefile b/Makefile
+index c290316..d8ebecd 100755
+--- a/Makefile
++++ b/Makefile
+@@ -7,7 +7,9 @@ MODULE_NAME := rtl8192cd
+ rtl8192cd-objs += rtl8197f_platform_glue.o sha256.o
+ 
+ ifeq ($(CONFIG_RTL8192CD_LINUX6_BUS),y)
++ifneq ($(CONFIG_MW5_LEGACY_WEXT),y)
+ EXTRA_CFLAGS += -DRTK_NL80211
++endif
+ rtl8192cd-objs += linux6/rtl8192cd_core.o \
+ 	linux6/rtl8192cd_board.o \
+ 	linux6/rtl8192cd_factory.o \
+@@ -46,6 +48,9 @@ RTL8197F_CPP_CONFIGS := \
+ 	CONFIG_OPENWRT_SDK \
+ 	CONFIG_CFG80211 \
+ 	CONFIG_RTL8192CD_LINUX6_BUS \
++	CONFIG_MW5_LEGACY_WEXT \
++	CONFIG_RTL_COMAPI_WLTOOLS \
++	CONFIG_RTL_COMAPI_CFGFILE \
+ 	CONFIG_MW5_ACCEL \
+ 	CONFIG_MW5_BOARD_QUIRKS \
+ 	CONFIG_MW5_OEM_WLAN_ORDER \
+@@ -530,6 +535,7 @@ endif
+ # Linux6 bus selection is therefore also an explicit selector for the private
+ # cfg80211 adapter objects.  Without this, RTK_NL80211 callers compile while
+ # their implementations are omitted and MODPOST reports unresolved symbols.
++ifneq ($(CONFIG_MW5_LEGACY_WEXT),y)
+ ifneq ($(filter y m,$(CONFIG_CFG80211) $(CONFIG_RTL8192CD_LINUX6_BUS)),)
+ EXTRA_CFLAGS += -DRTK_NL80211
+ rtl8192cd-objs += 8192cd_net80211.o 8192cd_psk_hapd.o 8192cd_cfg80211.o
+@@ -540,6 +546,7 @@ ifeq ($(CONFIG_PACP_SUPPORT),y)
+ rtl8192cd-objs += 8192cd_comapi.o
+ endif
+ endif
++endif
+ 
+ ifeq ($(CONFIG_RTK_WLAN_MANAGER), y)
+ 		rtl8192cd-objs += rtw_wlan_manager.o
+@@ -934,7 +941,7 @@ endif
+ #
+ #Build C code for TXT or BIN file
+ #
+-$(obj)/8192cd_hw.o :  $(SRCS_TXT) $(SRCS_BIN) $(SRCS_BIN_U) $(TXPWR_HEADER)
++$(obj)/8192cd_hw.o $(obj)/WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.o $(obj)/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.o :  $(SRCS_TXT) $(SRCS_BIN) $(SRCS_BIN_U) $(TXPWR_HEADER)
+ 
+ $(obj)/data_%.c: $(src)/$(RTL_WLAN_DATA_DIR)/%.txt
+ 	rm -f $(obj)/TXPWR_92C.h
+diff --git a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c b/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
+index da6a594..fff2480 100755
+--- a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
++++ b/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
+@@ -154,6 +154,8 @@ VAR_MAPPING(TxPowerTrack_AP_8814B,TxPowerTrack_AP_8814B);
+ VAR_MAPPING(TxPowerTrack_AP_8814Bmp, TxPowerTrack_AP_8814Bmp);
+ 
+ //PE fw
++#ifdef CONFIG_RTL_TAROKO_OFFLOAD
+ #include "../../../data_wfo_rtl8192cd.c"
+ VAR_MAPPING(wfo_rtl8192cd, wfo_rtl8192cd);
++#endif
+ 
+diff --git a/linux6/rtl8192cd_board.c b/linux6/rtl8192cd_board.c
+index 13e8ac0..8dd4338 100755
+--- a/linux6/rtl8192cd_board.c
++++ b/linux6/rtl8192cd_board.c
+@@ -2,9 +2,16 @@
+ /* Linux 6.x DT/NVMEM board-data glue for RTL8197F dual-radio boards. */
+ #include <linux/device.h>
+ #include <linux/etherdevice.h>
+-#include <linux/nvmem-consumer.h>
++#include <linux/of.h>
+ #include <linux/property.h>
+ #include <linux/slab.h>
++#include <linux/version.h>
++#if IS_ENABLED(CONFIG_NVMEM)
++#include <linux/nvmem-consumer.h>
++#endif
++#if IS_ENABLED(CONFIG_MTD)
++#include <linux/mtd/mtd.h>
++#endif
+ 
+ #include "rtl8192cd_linux6.h"
+ #include "rtl8192cd_factory_format.h"
+@@ -17,6 +24,7 @@ static void rtl8192cd_linux6_kfree(void *data)
+ static int rtl8192cd_linux6_read_cell(struct device *dev, const char *name,
+ 				      void **data, size_t *data_len)
+ {
++#if IS_ENABLED(CONFIG_NVMEM)
+ 	struct nvmem_cell *cell;
+ 	void *buf;
+ 	size_t len;
+@@ -41,7 +49,48 @@ static int rtl8192cd_linux6_read_cell(struct device *dev, const char *name,
+ 	*data = buf;
+ 	*data_len = len;
+ 	return 0;
++#else
++	return 0;
++#endif
++}
++
++#if !IS_ENABLED(CONFIG_NVMEM) && IS_ENABLED(CONFIG_MTD)
++static int rtl8192cd_linux414_read_mtd_cfg(struct device *dev,
++					   void **data, size_t *data_len)
++{
++	struct mtd_info *mtd;
++	void *buf;
++	size_t retlen = 0;
++	int ret;
++
++	mtd = get_mtd_device_nm("cfg");
++	if (IS_ERR(mtd))
++		return 0;
++	if (mtd->size < 0x10000) {
++		put_mtd_device(mtd);
++		return 0;
++	}
++	buf = kmalloc(0x10000, GFP_KERNEL);
++	if (!buf) {
++		put_mtd_device(mtd);
++		return -ENOMEM;
++	}
++	ret = mtd_read(mtd, 0, 0x10000, &retlen, buf);
++	put_mtd_device(mtd);
++	if (ret || retlen != 0x10000) {
++		kfree(buf);
++		dev_warn(dev, "read-only cfg MTD read incomplete (%d, %zu); keeping eFuse defaults\n",
++			 ret, retlen);
++		return 0;
++	}
++	ret = devm_add_action_or_reset(dev, rtl8192cd_linux6_kfree, buf);
++	if (ret)
++		return ret;
++	*data = buf;
++	*data_len = 0x10000;
++	return 0;
+ }
++#endif
+ 
+ static int rtl8192cd_hex_nibble(u8 c)
+ {
+@@ -110,6 +159,7 @@ static int rtl8192cd_factory_mac(const void *factory, size_t factory_len,
+ 
+ static int rtl8192cd_linux6_read_mac_cell(struct device *dev, u8 *addr)
+ {
++#if IS_ENABLED(CONFIG_NVMEM)
+ 	struct nvmem_cell *cell;
+ 	void *buf;
+ 	size_t len;
+@@ -140,6 +190,9 @@ static int rtl8192cd_linux6_read_mac_cell(struct device *dev, u8 *addr)
+ 
+ 	kfree(buf);
+ 	return ret;
++#else
++	return -ENOENT;
++#endif
+ }
+ 
+ int rtl8192cd_linux6_parse_board_data(struct device *dev,
+@@ -182,7 +235,17 @@ int rtl8192cd_linux6_parse_board_data(struct device *dev,
+ 					&board->factory, &board->factory_len);
+ 	if (ret)
+ 		return ret;
+-	if (board->factory_len) {
++#if !IS_ENABLED(CONFIG_NVMEM) && IS_ENABLED(CONFIG_MTD)
++	if (!board->factory_len && of_machine_is_compatible("rockspace,rsd0614")) {
++		ret = rtl8192cd_linux414_read_mtd_cfg(dev, &board->factory,
++						      &board->factory_len);
++		if (ret)
++			return ret;
++		if (board->factory_len == 0x10000)
++			board->factory_format = RTL_FACTORY_TENDA_KV;
++	}
++#endif
++	if (board->factory_len && board->factory_format == RTL_FACTORY_NONE) {
+ 		ret = device_property_read_string(dev, "realtek,factory-format", &format);
+ 		if (ret)
+ 			return dev_err_probe(dev, ret, "factory requires an explicit format\n");
+diff --git a/linux6/rtl8192cd_core.c b/linux6/rtl8192cd_core.c
+index eb1ed05..71cd6fb 100755
+--- a/linux6/rtl8192cd_core.c
++++ b/linux6/rtl8192cd_core.c
+@@ -106,10 +106,12 @@ int rtl8192cd_linux6_attach(struct rtl8192cd_linux6_hw *hw)
+ 		hw->debugfs_dir = debugfs_create_dir(dev_name(hw->dev),
+ 					       rtl8192cd_debugfs_root);
+ 		if (!IS_ERR_OR_NULL(hw->debugfs_dir)) {
++#ifdef RTK_NL80211
+ 			debugfs_create_u32("cfg80211_queue_depth", 0444, hw->debugfs_dir,
+ 					   &hw->priv->pshare->cfg80211_queue_len);
+ 			debugfs_create_u64("cfg80211_queue_full_drops", 0444, hw->debugfs_dir,
+ 					   &hw->priv->pshare->cfg80211_queue_full_drops);
++#endif
+ 			debugfs_create_u8("radio_index", 0444, hw->debugfs_dir,
+ 					  &hw->board.radio_index);
+ 			debugfs_create_u8("rfe_type", 0444, hw->debugfs_dir,
+diff --git a/linux6/rtl8197f_soc.c b/linux6/rtl8197f_soc.c
+index a3d5caa..104daa2 100755
+--- a/linux6/rtl8197f_soc.c
++++ b/linux6/rtl8197f_soc.c
+@@ -1,7 +1,9 @@
+ // SPDX-License-Identifier: GPL-2.0-only
+ /* RTL8197FS/FH integrated WLAN platform backend for Linux 6.x. */
+ #include <linux/dma-mapping.h>
++#include <linux/io.h>
+ #include <linux/module.h>
++#include <linux/version.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+@@ -21,7 +23,12 @@ static int rtl8197f_soc_probe(struct platform_device *pdev)
+ 
+ 	hw->dev = &pdev->dev;
+ 	hw->bus_type = RTL8192CD_BUS_SOC;
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 7, 0)
+ 	hw->mmio = devm_platform_get_and_ioremap_resource(pdev, 0, &res);
++#else
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	hw->mmio = devm_ioremap_resource(&pdev->dev, res);
++#endif
+ 	if (IS_ERR(hw->mmio))
+ 		return PTR_ERR(hw->mmio);
+ 	hw->mmio_len = resource_size(res);
+@@ -45,20 +52,46 @@ static int rtl8197f_soc_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++	/* On Linux 4.14 arch/mips/realtek/irq.c, WMAC (BIT(29)->IP6) stays masked
++	 * at boot until the SoC WMAC driver binds; clear stale pending and unmask. */
++	__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
++	__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) | BIT(29),
++		     (void __iomem *)0xB8003000UL);
++#endif
+ 	platform_set_drvdata(pdev, hw);
+ 	ret = rtl8192cd_linux6_attach(hw);
+-	if (ret)
++	if (ret) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++		__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) & ~BIT(29),
++			     (void __iomem *)0xB8003000UL);
++#endif
+ 		return dev_err_probe(&pdev->dev, ret, "vendor core attach failed\n");
++	}
+ 
+ 	return 0;
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+ static void rtl8197f_soc_remove(struct platform_device *pdev)
+ {
+ 	struct rtl8192cd_linux6_hw *hw = platform_get_drvdata(pdev);
+ 
+ 	rtl8192cd_linux6_detach(hw);
+ }
++#else
++static int rtl8197f_soc_remove(struct platform_device *pdev)
++{
++	struct rtl8192cd_linux6_hw *hw = platform_get_drvdata(pdev);
++
++	rtl8192cd_linux6_detach(hw);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++	__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) & ~BIT(29),
++		     (void __iomem *)0xB8003000UL);
++#endif
++	return 0;
++}
++#endif
+ 
+ static const struct of_device_id rtl8197f_soc_of_match[] = {
+ 	{ .compatible = "realtek,rtl8197g-wlan" },
+@@ -72,7 +105,11 @@ MODULE_DEVICE_TABLE(of, rtl8197f_soc_of_match);
+ 
+ static struct platform_driver rtl8197f_soc_driver = {
+ 	.probe = rtl8197f_soc_probe,
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+ 	.remove_new = rtl8197f_soc_remove,
++#else
++	.remove = rtl8197f_soc_remove,
++#endif
+ 	.driver = {
+ 		.name = "rtl8197f_soc",
+ 		.of_match_table = rtl8197f_soc_of_match,
+diff --git a/linux6/rtl8822b_pci.c b/linux6/rtl8822b_pci.c
+index f0a4ca6..5ae8b15 100755
+--- a/linux6/rtl8822b_pci.c
++++ b/linux6/rtl8822b_pci.c
+@@ -6,6 +6,7 @@
+ #include <linux/of_irq.h>
+ #include <linux/pci.h>
+ #include <linux/slab.h>
++#include <linux/version.h>
+ 
+ #include "rtl8192cd_linux6.h"
+ 
+@@ -48,10 +49,12 @@ static int rtl8822b_mw5_host_irq(struct pci_dev *pdev)
+ 	return irq;
+ }
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+ static void rtl8192cd_free_irq_vectors(void *data)
+ {
+ 	pci_free_irq_vectors(data);
+ }
++#endif
+ 
+ static int rtl8822b_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
+ {
+@@ -122,6 +125,7 @@ static int rtl8822b_pci_probe(struct pci_dev *pdev, const struct pci_device_id *
+ 				"cannot resolve PCIe WLAN IRQ from host DT\n");
+ 		pdev->irq = host_irq;
+ 	}
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0) || defined(CONFIG_PCI_MSI)
+ 	ret = pci_alloc_irq_vectors(pdev, 1, 1, PCI_IRQ_LEGACY);
+ 	if (ret < 0)
+ 		return dev_err_probe(&pdev->dev, ret, "cannot allocate PCI IRQ\n");
+@@ -131,6 +135,11 @@ static int rtl8822b_pci_probe(struct pci_dev *pdev, const struct pci_device_id *
+ 	host_irq = pci_irq_vector(pdev, 0);
+ 	if (host_irq < 0)
+ 		return host_irq;
++#else
++	host_irq = pdev->irq;
++	if (host_irq <= 0 || host_irq == 255)
++		return dev_err_probe(&pdev->dev, -ENXIO, "invalid legacy PCI IRQ %d\n", host_irq);
++#endif
+ 
+ 	hw = devm_kzalloc(&pdev->dev, sizeof(*hw), GFP_KERNEL);
+ 	if (!hw)
+diff --git a/rtl8197f_linux_compat.h b/rtl8197f_linux_compat.h
+index f04895f..0529e2d 100755
+--- a/rtl8197f_linux_compat.h
++++ b/rtl8197f_linux_compat.h
+@@ -16,7 +16,10 @@
+ #include <linux/interrupt.h>
+ #include <linux/printk.h>
+ #include <asm/io.h>
++#include <linux/ieee80211.h>
++#ifdef RTK_NL80211
+ #include <net/cfg80211.h>
++#endif
+ 
+ /* OpenWrt 24.10 runs Linux 6.6 with cfg80211/mac80211 backported from 6.12.
+  * LINUX_VERSION_CODE therefore describes the base kernel, not the wireless
+@@ -26,16 +29,58 @@
+ #define RTL8192CD_CFG80211_API_612 1
+ #endif
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 15, 0)
+ #ifndef printk
+ #define printk _printk
+ #endif
++#endif
+ 
++#ifdef RTK_NL80211
+ #ifndef IEEE80211_BAND_2GHZ
+ #define IEEE80211_BAND_2GHZ NL80211_BAND_2GHZ
+ #endif
+ #ifndef IEEE80211_BAND_5GHZ
+ #define IEEE80211_BAND_5GHZ NL80211_BAND_5GHZ
+ #endif
++#endif
++
++#ifndef PCI_STD_NUM_BARS
++#define PCI_STD_NUM_BARS 6
++#endif
++
++#ifndef fallthrough
++#define fallthrough do {} while (0)
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
++static inline void eth_hw_addr_set(struct net_device *dev, const u8 *addr)
++{
++	ether_addr_copy(dev->dev_addr, addr);
++}
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
++static inline void eth_addr_add(u8 *addr, long offset)
++{
++	u64 u = ether_addr_to_u64(addr);
++	u += offset;
++	u64_to_ether_addr(u, addr);
++}
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 9, 0)
++#define dev_err_probe(dev, err, fmt, ...) ({ \
++	int __err = (err); \
++	if (__err != -EPROBE_DEFER) \
++		dev_err((dev), "error %d: " fmt, __err, ##__VA_ARGS__); \
++	__err; \
++})
++#endif
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
++#define netif_napi_add_weight(dev, napi, poll, weight) \
++	netif_napi_add((dev), (napi), (poll), (weight))
++#endif
+ 
+ #ifndef PCI_DMA_TODEVICE
+ #define PCI_DMA_TODEVICE DMA_TO_DEVICE
+@@ -44,7 +89,8 @@
+ #define PCI_DMA_FROMDEVICE DMA_FROM_DEVICE
+ #endif
+ 
+-/* PCI DMA convenience wrappers removed from newer kernels. */
++/* PCI DMA convenience wrappers removed from Linux 5.18+. */
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
+ #ifndef pci_alloc_consistent
+ #define pci_alloc_consistent(pdev, size, dma_handle) \
+ 	dma_alloc_coherent(&(pdev)->dev, (size), (dma_handle), GFP_KERNEL)
+@@ -69,13 +115,16 @@
+ #define pci_dma_sync_single_for_device(pdev, dma_addr, size, direction) \
+ 	dma_sync_single_for_device(&(pdev)->dev, (dma_addr), (size), (direction))
+ #endif
++#endif /* >= 5.18.0 */
+ 
+ #ifndef ioremap_nocache
+ #define ioremap_nocache(addr, size) ioremap((addr), (size))
+ #endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 17, 0)
+ #ifndef PDE_DATA
+ #define PDE_DATA(inode) pde_data(inode)
+ #endif
++#endif
+ #ifndef CPHYSADDR
+ #define CPHYSADDR(addr) ((unsigned long)virt_to_phys((void *)(unsigned long)(addr)))
+ #endif
+@@ -144,12 +193,20 @@ static inline void mw5_legacy_add_timer(struct mw5_legacy_timer *timer)
+ 
+ static inline int mw5_legacy_del_timer(struct mw5_legacy_timer *timer)
+ {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+ 	return timer_delete(&timer->timer);
++#else
++	return del_timer(&timer->timer);
++#endif
+ }
+ 
+ static inline int mw5_legacy_del_timer_sync(struct mw5_legacy_timer *timer)
+ {
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0)
+ 	return timer_delete_sync(&timer->timer);
++#else
++	return del_timer_sync(&timer->timer);
++#endif
+ }
+ 
+ static inline int mw5_legacy_timer_pending(const struct mw5_legacy_timer *timer)
+diff --git a/rtl8197f_platform_glue.c b/rtl8197f_platform_glue.c
+index 60ba5b9..8811f1b 100755
+--- a/rtl8197f_platform_glue.c
++++ b/rtl8197f_platform_glue.c
+@@ -1,5 +1,6 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /* RTL8197F family compatibility and bring-up telemetry for rtl8192cd. */
++#include <linux/io.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/string.h>
+@@ -84,6 +85,8 @@ static const char *rtl8197f_detect_profile(void)
+ 		return "mw5";
+ 	if (of_machine_is_compatible("xiaomi,r4-rd05"))
+ 		return "rd05";
++	if (of_machine_is_compatible("rockspace,rsd0614"))
++		return "rsd0614";
+ 	if (of_machine_is_compatible("tenda,ac23") ||
+ 	    of_machine_is_compatible("tenda,lynx-rtl8197f"))
+ 		return "ac23";
+@@ -103,6 +106,24 @@ unsigned int rtl819x_bond_option(void)
+ 	if (!strcmp(profile, "mw5"))
+ 		return BSP_BOND_97FS;
+ 
++	if (!strcmp(profile, "rsd0614")) {
++		unsigned int strap = __raw_readl((void __iomem *)0xB800000CUL) & 0xfU;
++		switch (strap) {
++		case 0x0:
++			return BSP_BOND_97FB;
++		case 0x4:
++		case 0x5:
++		case 0x6:
++			return BSP_BOND_97FN;
++		case 0xa:
++		case 0xb:
++		case 0xc:
++			return BSP_BOND_97FS;
++		default:
++			return BSP_BOND_97FN;
++		}
++	}
++
+ 	/* RD05 is RTL8197FH-VG and AC23 is listed as RTL8197FH.  The GPL BSP
+ 	 * handles those non-FS packages through the 97FB/FH bond path.
+ 	 */

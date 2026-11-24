@@ -65,14 +65,14 @@ if [[ "${BUILDER_ONLY:-0}" == 1 ]]; then
 fi
 
 PROJECT_COMMIT="${PROJECT_COMMIT:-$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo NOT_AVAILABLE)}"
-WORK_VOLUME="rsd0614-openwrt-v551-work-${RUN_ID}"
+WORK_VOLUME="rsd0614-openwrt-v560-work-${RUN_ID}"
 
 cleanup_volume() {
     docker volume rm -f "$WORK_VOLUME" >/dev/null 2>&1 || true
 }
 trap cleanup_volume EXIT
 
-docker volume create --label "rsd0614.work=v5.5.1-ephemeral" "$WORK_VOLUME" >/dev/null
+docker volume create --label "rsd0614.work=v5.6.0-ephemeral" "$WORK_VOLUME" >/dev/null
 docker run --rm --platform=linux/amd64 --network=none --user 0:0 \
     --mount "type=volume,source=$WORK_VOLUME,target=/work" \
     "$BUILDER_IMAGE" sh -c 'set -eu; chown 1000:1000 /work; chmod u+rwx /work' 2>&1 | tee "$LOGS_DIR/$RUN_ID-volume-init.log"

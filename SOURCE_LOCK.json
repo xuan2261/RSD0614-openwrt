@@ -3,13 +3,19 @@
   "donor_commit": "229536d89c25a676417717304fcef386a53a7875",
   "base_repo": "ggbruno/openwrt",
   "base_commit": "8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67",
+  "wifi_driver_repo": "tobyw121/Openwrt_RTL",
+  "wifi_driver_commit": "1529557b0936019462c4b24f98bc8436d359bd3a",
+  "luci_feed_repo": "openwrt/luci",
+  "luci_feed_commit": "f25285a6c26e8776f153994704710cb8e51fad91",
+  "packages_feed_repo": "openwrt/packages",
+  "packages_feed_commit": "6df6880800397ab3821572c6c5ad18e300374d9e",
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.5.1",
+  "bundle_version": "5.6.0",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "M2 RAM-only wired Gigabit + PCIe0 bring-up candidate (v5.5.1-vg-newdesc-ramboot); clean ttyS0 console (console=ttyS0,115200) and v5.3.9 runtime SoC-ID UART dispatch (realtek,rtl819x-sysc SoC ID -> RTL8197FH-VG (0x81970000) vg-std vs non-VG 0x8197F000); enable spi0 with bounded spi-sheipa timeouts and conservative single-lane BH25Q64 (0x684017) read profile across six strictly read-only MTD partitions; enable hardware-verified GPIO, Reset button (gpio1 4), external RTL8367S switch (0x6367/0x0020 on gpio1 24 SCK / gpio1 23 SDA, EXT1 cpu_port=6, LAN 0..3 VID2 eth0.2 192.168.1.1, WAN 4 VID1 eth0.1 DHCP), RTL8197FH-VG native 6-dword new-descriptor NIC engine (CPUICR1=0x001861d3, DMA_CR1/DMA_CR4/TXRINGCR/CPUQDM0/MACCTRL1, runtime desc_mode fallback, runout ISR storm guard) + RGMII pad preservation (0x579fff7f) + PITCR CF_FIX_IPG=1 + P0GMIICR RX_delay=7 + fabric_gw_rearm=0, and hardware-verified 40 MHz PCIe0 (10ec:b814 RTL8814BR with VG MDIO 0x08=0x3101); retain passive /proc/rsd0614_hw_survey (0444), opt-in /proc/rsd0614_probe (0600), and sanitized usr/sbin/rsd0614-survey; pcie1 and on-SoC WMAC (RTL8197G HAL 0x15) kept disabled with WMAC IRQ BIT(29) masked; all enabled auto mount_root paths and firmware MTD splitters suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "M3 consolidated RAM-only dual-band Wi-Fi + LuCI 19.07 + wired Gigabit candidate (v5.6.0-m3-dualband-wifi-luci-ramboot) built atop hardware-verified M2 v5.5.1 wired Gigabit (1ms ping, 0% loss, Dropbear SSH, 6-dword newdesc NIC, RTL8367S, PCIe0 10ec:b814, clean ttyS0, BH25Q64 6 read-only MTDs): adds out-of-tree pinned Realtek SDK v3.6.0 kmod-rtl8192cd-rsd0614 driving BOTH PCIe0 RTL8814BR (10ec:b814, 5 GHz 4x4 wlan0, IRQ 5) and on-SoC RTL8197G (HAL 0x15, 2.4 GHz 2x2 wlan1, 0x18640000 256KiB, IRQ 6 / GIMR BIT(29) armed at WMAC probe) with WEXT + in-kernel WPA2-PSK, read-only runtime /dev/mtd1 cfg tenda-kv RF calibration/MAC loader, hardware SR+0x0c bond strap, dual-band atomic netifd wireless handler (/lib/netifd/wireless/rtl8192cd.sh, /etc/Wireless -> /tmp/Wireless), pinned openwrt-19.07 LuCI web UI (uhttpd + luci), wireless-tools, ethtool, and iperf3; all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, all auto mount_root and MTD splitters stay suppressed, persistent flash stays NO-GO"
 }

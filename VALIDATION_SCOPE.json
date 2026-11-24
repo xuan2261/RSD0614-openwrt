@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.5.1",
+  "bundle_version": "5.6.0",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 129,
+  "regression_tests_per_run": 131,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (CI run 45379106697, 5m02s warm cache, 2960336 bytes / 0x002D2BD0, SHA-256 7bde54541c710954f59e7549f0b130ae46030a8de7b9cc779352a8e31280df65, deep_audit 29/29 PASS)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.5.1",
+  "openwrt_compile": "LOCAL DOCKER PASS (4180592 bytes / 0x003FCA70, decoded_size 14394009 bytes / 13.73 MiB, deep_audit 30/30 PASS); CI BUILD PENDING",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.0",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.5.0 on physical Rock Space RSD0614 V1.0: PCIe0 (10ec:b814 RTL8814BR, 40MHz, LTSSM=0x03d78a11, BAR0/BAR2 assigned), RTL8367S switch (gpio1 24/23, Port 2 & Port 6 1000M/FD, VLAN 1=4 6t / VLAN 2=0 1 2 3 6t, 5781 pkts, 0 FCS errors), and RGMII trunk (PITCR=00001001, P0GMIICR=060f7d57, PAD=579fff7f, USEDDSC rising under LAN traffic) PASSED; eth0 CPU-DMA RX stalled (rx_pkts=0, CPUIISR=00020000 runout storm) because bootloader left CPUICR1=0x00186183 (new 6-dword single-level descriptor mode) while donor rtl819x_swnic.c only drove legacy 2-level pointer rings",
-  "preflight": "PASS (129/129 local & CI regression tests)",
-  "previous_build_result": "v5.5.0 run 45364422799: compile (5m19s warm cache), audit (29/29), 2959120 bytes / 0x002D2710, SHA-256 b9795cc5bb5d400f2c88e38c3b99749103834fb12699bdd2a663ac5f0dfe36be; physical RAM-boot verified PCIe0+RTL8367S+RGMII trunk and isolated CPUICR1 new-descriptor mismatch"
+  "previous_hardware_result": "v5.5.1 M2 100% VERIFIED on physical Rock Space RSD0614 V1.0: RTL8197FH-VG 6-dword new-descriptor eth0 (newdesc=1, CPUICR1=0x001861d3, rx_pkts=107, runout=0, CPUIISR=00000000, FCS wedge detector armed), RTL8367S Gigabit switch (VLAN 1 WAN / VLAN 2 LAN, 1000M/FD), PCIe0 (10ec:b814 RTL8814BR BAR0/BAR2 assigned), ping 192.168.1.1 = 4/4 replies (1ms, 0% loss), and Dropbear SSH reached cleanly with zero kernel oops or errors",
+  "preflight": "PASS (131/131 local regression tests)",
+  "previous_build_result": "v5.5.1 run 45379106697: compile (5m02s warm cache), deep_audit (29/29 PASS), 2960336 bytes / 0x002D2BD0, SHA-256 7bde54541c710954f59e7549f0b130ae46030a8de7b9cc779352a8e31280df65; physical RAM-boot verified M2 wired Gigabit end-to-end"
 }

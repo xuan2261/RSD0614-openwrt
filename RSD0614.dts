@@ -2,9 +2,9 @@
 /dts-v1/;
 
 /*
- * Rock Space RSD0614 V1.0 — M2 wired Gigabit + PCIe0 RAM-boot bring-up.
+ * Rock Space RSD0614 V1.0 — M3 dual-band Wi-Fi + LuCI + wired Gigabit RAM-boot.
  *
- * Hardware-verified target evidence (v5.3.9 + v5.4.1 + v5.4.2 on silicon):
+ * Hardware-verified target evidence (v5.3.9..v5.5.1 on silicon):
  *   - SoC: RTL8197FH-VG (SYSC_SOC_ID=0x81970001, BOND_OPTION=0x4 97FN, 40 MHz XTAL)
  *   - RAM: 64 MiB DDR2-533
  *   - Flash: BH25Q64 (0x684017), 8 MiB SPI NOR, 64 KiB erase blocks (6 read-only MTDs)
@@ -12,14 +12,14 @@
  *   - Physical Reset/WPS button: GPIO_PEFGH bit 4 (&gpio1 4 GPIO_ACTIVE_LOW)
  *   - External switch: RTL8367S (chip_num=0x6367, ver=0x0020) over bit-banged SMI
  *     SCK=&gpio1 24 (PH0), SDA=&gpio1 23 (PG7); EXT1/cpu_port=6, LAN=0..3, WAN=4
- *   - SoC<->switch RGMII trunk: SWCORE Port 0, P0GMIICR RX_delay=7, PAD=0x579fff7f
- *   - PCIe0 (40 MHz XTAL): LTSSM=0x11 Link UP -> RTL8814BR (10ec:b814)
- *   - On-SoC 2.4 GHz WMAC: RTL8197G (HAL_HW_TYPE_ID=0x15, cut=1) — disabled until M3
+ *   - SoC<->switch RGMII trunk + VG 6-dword NIC: verified ping/SSH 0% loss in v5.5.1
+ *   - PCIe0 (40 MHz XTAL): LTSSM=0x11 Link UP -> RTL8814BR (10ec:b814, 5 GHz wlan0)
+ *   - On-SoC 2.4 GHz WMAC: RTL8197G (HAL_HW_TYPE_ID=0x15, cut=1, 2.4 GHz wlan1)
  *
  * RAM-boot safety policy:
  *   - every MTD partition remains strictly read-only;
  *   - persistent flash remains NO-GO;
- *   - pcie1 (unverified, shares IRQ 6) and wmac (awaits M3 RTL8197G/8814B driver) stay disabled;
+ *   - pcie1 (unverified, shares IRQ 6 with WMAC) remains disabled;
  *   - unverified LED GPIOs remain unclaimed.
  */
 
@@ -56,7 +56,7 @@
 
 	/*
 	 * External RTL8367S 5-port Gigabit switch (chip_num=0x6367, ver=0x0020),
-	 * verified in v5.4.2 on bit-banged SMI SCK=PEFGH[24] (PH0), SDA=PEFGH[23] (PG7).
+	 * verified in v5.4.2..v5.5.1 on bit-banged SMI SCK=PEFGH[24] (PH0), SDA=PEFGH[23] (PG7).
 	 * RGMII uplink is EXT1 (port 6); LAN=ports 0..3 (VID2), WAN=port 4 (VID1).
 	 * PH2 (gpio1 26, hardware RESET#) is held HIGH by bootloader and untouched.
 	 */
@@ -139,7 +139,7 @@
 };
 
 &pcie0 {
-	status = "okay"; /* 10ec:b814 RTL8814BR Link UP verified in v5.4.2 */
+	status = "okay"; /* 10ec:b814 RTL8814BR Link UP verified in v5.4.2..v5.5.1 */
 };
 
 &pcie1 {
@@ -147,5 +147,7 @@
 };
 
 &wmac {
-	status = "disabled"; /* RTL8197G (HAL 0x15) awaits M3 dual-band Wi-Fi driver */
+	compatible = "realtek,rtl8197g-wlan", "realtek,rtl8197f-wmac";
+	reg = <0x18640000 0x40000>; /* RTL8197G 256 KiB WMAC aperture */
+	status = "okay"; /* RTL8197G (HAL 0x15), target-verified in v5.4.2 */
 };

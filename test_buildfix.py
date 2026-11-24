@@ -55,6 +55,9 @@ class ConfigTests(unittest.TestCase):
   with self.assertRaises(ValueError):check_config.validate('CONFIG_TARGET_ROOTFS_INITRAMFS=y\n')
  def test_18_wifi_module_rejected_not_only_builtin(self):
   with self.assertRaises(ValueError):check_config.validate(GOOD_CONFIG+'CONFIG_PACKAGE_kmod-rtl8192cd=m\n')
+  with self.assertRaises(ValueError):check_config.validate(GOOD_CONFIG+'CONFIG_PACKAGE_kmod-rtw88=y\n')
+  with self.assertRaises(ValueError):check_config.validate(GOOD_CONFIG+'CONFIG_PACKAGE_wpad-basic=y\n')
+  check_config.validate(GOOD_CONFIG+'CONFIG_PACKAGE_kmod-rtl8192cd-rsd0614=y\nCONFIG_PACKAGE_luci=y\n')
  def test_19_extra_target_rejected(self):
   with self.assertRaises(ValueError):check_config.validate(GOOD_CONFIG+'CONFIG_TARGET_realtek_rtl8197f_DEVICE_GWR1200AC_V1=y\n')
  def test_20_persistent_fs_rejected(self):
@@ -91,8 +94,9 @@ class PackagingTests(unittest.TestCase):
   self.assertEqual(actual,[(0,0x20000),(0x20000,0x10000),(0x30000,0x7a0000),(0x7d0000,0x10000),(0x7e0000,0x10000),(0x7f0000,0x10000)])
  def test_34_dts_peripherals_explicitly_disabled(self):
   t=(ROOT/'RSD0614.dts').read_text()
-  for label in ('pcie1','wmac'):self.assertRegex(t,rf'&{label}\s*\{{[^}}]*status = "disabled";[^}}]*\}};')
-  for label in ('gpio0','gpio1','ethernet','pcie0'):self.assertRegex(t,rf'&{label}\s*\{{[^}}]*status = "okay";[^}}]*\}};')
+  self.assertRegex(t,r'&pcie1\s*\{[^}]*status = "disabled";[^}]*\};')
+  for label in ('gpio0','gpio1','ethernet','pcie0','wmac'):self.assertRegex(t,rf'&{label}\s*\{{[^}}]*status = "okay";[^}}]*\}};')
+  self.assertRegex(t,r'&wmac\s*\{[^}]*compatible = "realtek,rtl8197g-wlan", "realtek,rtl8197f-wmac";[^}]*reg = <0x18640000 0x40000>;[^}]*\};')
   self.assertRegex(t,r'&pcie_clk\s*\{[^}]*clock-frequency = <40000000>;[^}]*\};')
   self.assertIn('compatible = "realtek,rtl8367b";',t);self.assertIn('cpu_port = <6>;',t);self.assertIn('gpio-sck = <&gpio1 24 GPIO_ACTIVE_HIGH>;',t);self.assertIn('gpio-sda = <&gpio1 23 GPIO_ACTIVE_HIGH>;',t);self.assertIn('gpios = <&gpio1 4 GPIO_ACTIVE_LOW>;',t)
  def test_34b_dts_clean_console_bootargs(self):
@@ -100,7 +104,7 @@ class PackagingTests(unittest.TestCase):
  def test_34c_dts_spi0_enabled_conservative_readonly_only(self):
   t=(ROOT/'RSD0614.dts').read_text();self.assertRegex(t,r'&spi0\s*\{[^}]*status = "okay";');self.assertIn('compatible = "jedec,spi-nor";',t);self.assertIn('spi-max-frequency = <25000000>;',t)
  def test_35_source_commit_locks_preserved(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['donor_commit'],profile.EXPECTED_DONOR_COMMIT);self.assertEqual(lock['base_commit'],'8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67');self.assertFalse(lock['ram_boot_authorized'])
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['donor_commit'],profile.EXPECTED_DONOR_COMMIT);self.assertEqual(lock['base_commit'],'8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67');self.assertEqual(lock['wifi_driver_commit'],'1529557b0936019462c4b24f98bc8436d359bd3a');self.assertEqual(lock['luci_feed_commit'],'f25285a6c26e8776f153994704710cb8e51fad91');self.assertEqual(lock['packages_feed_commit'],'6df6880800397ab3821572c6c5ad18e300374d9e');self.assertFalse(lock['ram_boot_authorized'])
  def test_36_build_files_have_no_router_transport_or_flash_commands(self):
   for name in ('Build-RSD0614.ps1','build-rsd0614-initramfs.sh','build-local-linux.sh'):
    text=(ROOT/name).read_text()
@@ -108,7 +112,7 @@ class PackagingTests(unittest.TestCase):
  def test_37_wrapper_preserves_logs_and_uses_dedicated_volume(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text();self.assertIn('--progress=plain',t);self.assertIn('Tee-Object -FilePath',t);self.assertIn('type=volume,source=$Volume,target=/work',t);self.assertNotIn('Remove-Item',t);self.assertNotIn('volume prune',t);self.assertIn('$BuilderOnly',t)
  def test_38_seed_config_disables_cross_gdb_and_passes_validator(self):
-  seed=(ROOT/'seed-rsd0614-initramfs.config').read_text();self.assertIn('CONFIG_TOOLCHAINOPTS=y',seed);self.assertIn('# CONFIG_GDB is not set',seed);check_config.validate(seed)
+  seed=(ROOT/'seed-rsd0614-initramfs.config').read_text();self.assertIn('CONFIG_TOOLCHAINOPTS=y',seed);self.assertIn('# CONFIG_GDB is not set',seed);self.assertIn('CONFIG_PACKAGE_kmod-rtl8192cd-rsd0614=y',seed);self.assertIn('CONFIG_PACKAGE_luci=y',seed);check_config.validate(seed)
  def test_39_linux_wrapper_uses_ephemeral_volume_and_persistent_cache(self):
   t=(ROOT/'build-local-linux.sh').read_text()
   for token in ('set -euo pipefail','rsd0614-openwrt-builder:v5.1','builder.tar.zst','-e CACHE_DIR=/cache','BUILDER_IMAGE_ID=','PROJECT_COMMIT=','trap cleanup_volume EXIT'):self.assertIn(token,t)

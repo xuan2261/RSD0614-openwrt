@@ -1,0 +1,119 @@
+diff --git a/arch/mips/pci/pci-realtek.c b/arch/mips/pci/pci-realtek.c
+index 3326987..9aefeb6 100644
+--- a/arch/mips/pci/pci-realtek.c
++++ b/arch/mips/pci/pci-realtek.c
+@@ -294,6 +294,8 @@ static void realtek_pcie_reset(struct realtek_pci_controller *rpc)
+ 		realtek_pcie_mdio_write(rpc, 0x0f, 0x12f6);
+ 		realtek_pcie_mdio_write(rpc, 0x00, 0x0071);
+ 		realtek_pcie_mdio_write(rpc, 0x06, 0x1ac1);
++		if ((sr_r32(REALTEK_SR_REG_ID) & 0xFFFFF000u) == 0x81970000u)
++			realtek_pcie_mdio_write(rpc, 0x08, 0x3101);
+ 	} else {
+ 		realtek_pcie_mdio_write(rpc, 0x00, 0x0071);
+ 		realtek_pcie_mdio_write(rpc, 0x06, 0x18c1);
+diff --git a/drivers/net/ethernet/rtl819x/rtl819x-eth.c b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
+index 1035361..d16511b 100644
+--- a/drivers/net/ethernet/rtl819x/rtl819x-eth.c
++++ b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
+@@ -440,6 +440,14 @@ static int trunk_pause = 2;
+ module_param(trunk_pause, int, 0644);
+ MODULE_PARM_DESC(trunk_pause, "RGMII-trunk 802.3x pause: 2=force OFF (default, A-2 residual fix), 1=force on (bench A/B collapse), 0=leave loader value");
+ 
++static int p0_rx_delay = -1;
++module_param(p0_rx_delay, int, 0644);
++MODULE_PARM_DESC(p0_rx_delay, "Port0 RGMII RX delay (0..7; -1=auto: 7 on RTL8197F-VG, 5 on non-VG)");
++
++static int p0_tx_delay = -1;
++module_param(p0_tx_delay, int, 0644);
++MODULE_PARM_DESC(p0_tx_delay, "Port0 RGMII TX delay (0..1; -1=auto: 1)");
++
+ /* 8367S half of the trunk-pause fix (rtl8367b.c; CONFIG_RTL8367B_PHY=y, so
+  * this built-in <-> built-in reference links into vmlinux). */
+ extern int rtl8367s_trunk_pause_set(int on);
+@@ -680,35 +688,42 @@ static void rtl865x_start(void)
+ 		 * in exactly this test, which is why every step below is loader-exact. */
+ 		{
+ 			u32 v;
+-
+-			/* 1. board RGMII pad mux/drive (loader value) */
+-			REG32(0xB8000850) =
+-				(REG32(0xB8000850) & 0x019FFFFF) | 0xDA600000;
++			bool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);
++			u32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);
++			u32 tx_delay = (p0_tx_delay >= 0) ? ((u32)p0_tx_delay & 1u) : 1u;
++
++			/* 1. board RGMII pad mux/drive:
++			 *    RTL8197FH-VG (0x81970000): preserve bootloader VG pad config
++			 *    (RSD0614 V1.0 bootloader 0x579fff7f; non-VG 0xDA600000 clobbers
++			 *    bits[31:21], clearing VG bits 26/24/23 and setting bit 31). */
++			if (is_vg) {
++				if (!(REG32(0xB8000850) & (1u << 25)))
++					REG32(0xB8000850) = 0x579fff7fu;
++			} else {
++				REG32(0xB8000850) =
++					(REG32(0xB8000850) & 0x019FFFFF) | 0xDA600000;
++			}
+ 			/* 2. MACCR CF_SYSCLK_SEL (bits[13:12]=01) + MACCR1 bit0 */
+ 			REG32(RTL819X_SWCORE_BASE + 0x4000) |= (1u << 12);
+ 			REG32(RTL819X_SWCORE_BASE + 0x4058) |= (1u << 0);
+-			/* 3. EXTPCR0 bits[19:16] = 0x8 (stock init_8367r) */
++			/* 3. EXTPCR0 bits[19:16] = 0x8 (8-byte TX IPG for CPU-tag mode);
++			 *    RTL8197F-VG also sets PITCR CF_FIX_IPG (bits[17:12]=1). */
+ 			v = REG32(RTL819X_SWCORE_BASE + 0x5108);
+ 			REG32(RTL819X_SWCORE_BASE + 0x5108) =
+ 				(v & ~(0xFu << 16)) | (0x8u << 16);
++			if (is_vg) {
++				v = REG32(RTL819X_SWCORE_BASE + 0x4100);
++				REG32(RTL819X_SWCORE_BASE + 0x4100) =
++					(v & ~(0x3Fu << 12)) | (1u << 12);
++			}
+ 			/* 4. P0GMIICR: GMAC=RGMII (bits[24:23]=0), loader fields
+-			 * bits[17:16]=3 + bits[15:8]=0x7d, delays TX(bit4)+RX=5.
++			 * bits[17:16]=3 + bits[15:8]=0x7d, delays TX+RX (VG=7, non-VG=5).
+ 			 * Conf_done (bit6) stays CLEAR here — latched LAST, after
+-			 * the settle, exactly like the loader.
+-			 *
+-			 * CPU-tag mode: the vendor's 8197F+8367R arrangement, copied
+-			 * from init_8197f_p0() (sdk rtl865x_asicL2.c:6408):
+-			 *   P0GMIICR |= (3 << CF_SEL_RGTXC_OFFSET);
+-			 *   P0GMIICR |= (CFG_CPUC_TAG | CFG_TX_CPUC_TAG);  bits 25,26
+-			 *   MACCR1   |= PORT0_ROUTER_MODE;                 bit0 (step 2)
+-			 * The SoC MAC then inserts/strips the 4-byte 0x8899 tag in
+-			 * HARDWARE, so the RX descriptor's spa carries the real jack
+-			 * and TX can name a destination port. Conf_done still latches
+-			 * last, below — that ordering is what the loader relies on. */
++			 * the settle, exactly like the loader. */
+ 			v = REG32(RTL819X_SWCORE_BASE + 0x414C);
+ 			v &= ~((3u << 25) | (3u << 23) | (3u << 18) |
+ 			       (3u << 16) | (0xFFu << 8) | 0xFFu);
+-			v |= (3u << 16) | (0x7Du << 8) | (1u << 4) | (5u << 0);
++			v |= (3u << 16) | (0x7Du << 8) | (tx_delay << 4) | (rx_delay << 0);
+ 			v |= (3u << 25) | (3u << 18);	/* CFG_CPUC_TAG|CFG_TX_CPUC_TAG, CF_SEL_RGTXC */
+ 			REG32(RTL819X_SWCORE_BASE + 0x414C) = v;
+ 			/* 5. PITCR port0 = RGMII (default UTP!) */
+@@ -786,11 +801,13 @@ static void rtl865x_start(void)
+ 			if (rtl8367s_trunk_pause_set(trunk_pause == 1) < 0)
+ 				pr_err("rtl819x trunk-pause: 8367S SMI not probed — SoC side only (re-apply: eth0 down/up)\n");
+ 		}
+-		pr_err("rtl819x trunk-post: PITCR=%08x P0GMIICR=%08x MACCR=%08x PCRP0=%08x\n",
++		pr_err("rtl819x trunk-post: PITCR=%08x P0GMIICR=%08x MACCR=%08x PCRP0=%08x EXTPCR0=%08x PAD=%08x\n",
+ 		       REG32(RTL819X_SWCORE_BASE + 0x4100),
+ 		       REG32(RTL819X_SWCORE_BASE + 0x414C),
+ 		       REG32(RTL819X_SWCORE_BASE + 0x4000),
+-		       REG32(RTL819X_SWCORE_BASE + 0x4104));
++		       REG32(RTL819X_SWCORE_BASE + 0x4104),
++		       REG32(RTL819X_SWCORE_BASE + 0x5108),
++		       REG32(0xB8000850));
+ 
+ 		REG32(MSCR) |= MSCR_EN_L2;		/* global L2 forwarding enable (LAST) */
+ 	}
+@@ -1554,6 +1571,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
+ 	else
+ 		eth_hw_addr_random(dev);
+ 
++	if (of_machine_is_compatible("rockspace,rsd0614"))
++		fabric_gw_rearm = 0;
++
+ 	New_swNic_setDev(dev);
+ 	platform_set_drvdata(pdev, dev);
+ 

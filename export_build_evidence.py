@@ -12,8 +12,28 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     active=dict(re.findall(r'^(CONFIG_\w+)=(.*)$',config,re.M))
     for key in DISABLE_KERNEL:
         if active.get(key) in ('y','m'):raise ValueError('Unwanted driver/splitter survived config merge: '+key)
-    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW'):
+    for key in ('CONFIG_MTD_SPI_NOR','CONFIG_SPI_SHEIPA','CONFIG_SOC_RTL8197F','CONFIG_SERIAL_8250','CONFIG_SERIAL_8250_CONSOLE','CONFIG_SERIAL_8250_DW','CONFIG_NET_RTL819X','CONFIG_RTL8366_SMI','CONFIG_RTL8367B_PHY','CONFIG_PCI'):
         if active.get(key)!='y':raise ValueError('Required kernel feature missing: '+key)
+    ethsrc=linux/'drivers/net/ethernet/rtl819x/rtl819x-eth.c'
+    if not ethsrc.is_file():raise ValueError('Missing compiled rtl819x-eth.c: '+str(ethsrc))
+    ethtext=ethsrc.read_text()
+    for token in (
+        'bool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);',
+        'REG32(0xB8000850) = 0x579fff7fu;',
+        'u32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);',
+        '(v & ~(0x3Fu << 12)) | (1u << 12);',
+        'if (of_machine_is_compatible("rockspace,rsd0614"))',
+        'fabric_gw_rearm = 0;',
+    ):
+        if token not in ethtext:raise ValueError('RTL8197FH-VG RGMII/trunk patch missing from compiled rtl819x-eth.c: '+token)
+    pcisrc=linux/'arch/mips/pci/pci-realtek.c'
+    if not pcisrc.is_file():raise ValueError('Missing compiled pci-realtek.c: '+str(pcisrc))
+    pcitext=pcisrc.read_text()
+    for token in (
+        'if ((sr_r32(REALTEK_SR_REG_ID) & 0xFFFFF000u) == 0x81970000u)',
+        'realtek_pcie_mdio_write(rpc, 0x08, 0x3101);',
+    ):
+        if token not in pcitext:raise ValueError('RTL8197FH-VG 40MHz PCIe MDIO tuning missing from compiled pci-realtek.c: '+token)
     src=linux/'drivers/mtd/spi-nor/spi-nor.c'
     source=src.read_text()
     if not re.search(r'"bh25q64"\s*,\s*INFO\(0x684017',source):raise ValueError('BH25Q64 patch missing from compiled source')
@@ -27,7 +47,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         if token not in sheipatext:raise ValueError('Hardened bounded spi-sheipa guard missing from compiled source: '+token)
     if 'while (1) {' in sheipatext:raise ValueError('Unbounded polling loop survived in compiled spi-sheipa.c')
     irqsrc=linux/'arch/mips/realtek/irq.c';irqtext=irqsrc.read_text()
-    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 diagnostic direct-IRQ mask hardening missing from compiled source')
+    if IRQ_SAFE_BLOCK not in irqtext:raise ValueError('RSD0614 M2 direct-IRQ mask hardening missing from compiled source')
     surveysrc=linux/'arch/mips/realtek/rsd0614_survey.c'
     if not surveysrc.is_file():raise ValueError('Missing compiled omnibus survey source: '+str(surveysrc))
     surveytext=surveysrc.read_text()
@@ -131,7 +151,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

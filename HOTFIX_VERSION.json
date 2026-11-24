@@ -1,9 +1,9 @@
 {
-  "version": "5.4.2-omnibus-readonly-survey",
-  "base": "5.4.1-omnibus-readonly-survey",
-  "change": "fix /proc/rsd0614_probe split-newline write handling so probe-all runs smi+wmac+pcie0 end-to-end, replace slow 8MiB SquashFS scan with instant cvimg payload-end probe, and upgrade smi probe to safe multi-bus RTL8367 auto-discovery (SWCORE Clause-22 MDIO + mux-restored PABCD C2/C3 SMI + PEFGH G7/H0 SMI) after v5.4.1 hardware survey proved PINMUX_SEL2=0x0, button GPIO1_4, and RGMII trunk P0GMIICR=0x00037d57",
-  "volume": "rsd0614-openwrt-v542-work",
-  "volume_label": "rsd0614.work=v5.4.2",
+  "version": "5.5.0-wired-pcie-ramboot",
+  "base": "5.4.2-omnibus-readonly-survey",
+  "change": "M2 consolidated wired Gigabit + PCIe0 RAM-boot bring-up based on v5.4.1/v5.4.2 silicon verification: enable RTL8367S switch (gpio1 24 SCK / gpio1 23 SDA, EXT1 cpu_port=6, LAN 0..3 VID2 eth0.2 192.168.1.1, WAN 4 VID1 eth0.1 DHCP), RTL8197FH-VG RGMII pad preservation (0x579fff7f) + PITCR CF_FIX_IPG=1 + P0GMIICR RX_delay=7 + fabric_gw_rearm=0, physical Reset button (gpio1 4), and 40 MHz PCIe0 (10ec:b814 RTL8814BR with VG MDIO 0x08=0x3101); keep all 6 MTD partitions read-only and wmac (RTL8197G HAL 0x15) / pcie1 disabled until M3",
+  "volume": "rsd0614-openwrt-v550-work",
+  "volume_label": "rsd0614.work=v5.5.0",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -16,7 +16,8 @@
     "rsd0614-openwrt-v538-work",
     "rsd0614-openwrt-v539-work",
     "rsd0614-openwrt-v540-work",
-    "rsd0614-openwrt-v541-work"
+    "rsd0614-openwrt-v541-work",
+    "rsd0614-openwrt-v542-work"
   ],
   "persistent_flash": "NO-GO"
 }

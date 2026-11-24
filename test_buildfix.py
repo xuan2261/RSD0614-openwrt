@@ -91,9 +91,12 @@ class PackagingTests(unittest.TestCase):
   self.assertEqual(actual,[(0,0x20000),(0x20000,0x10000),(0x30000,0x7a0000),(0x7d0000,0x10000),(0x7e0000,0x10000),(0x7f0000,0x10000)])
  def test_34_dts_peripherals_explicitly_disabled(self):
   t=(ROOT/'RSD0614.dts').read_text()
-  for label in ('pcie0','pcie1','wmac','ethernet'):self.assertRegex(t,rf'&{label}\s*\{{\s*status = "disabled";\s*\}};')
+  for label in ('pcie1','wmac'):self.assertRegex(t,rf'&{label}\s*\{{[^}}]*status = "disabled";[^}}]*\}};')
+  for label in ('gpio0','gpio1','ethernet','pcie0'):self.assertRegex(t,rf'&{label}\s*\{{[^}}]*status = "okay";[^}}]*\}};')
+  self.assertRegex(t,r'&pcie_clk\s*\{[^}]*clock-frequency = <40000000>;[^}]*\};')
+  self.assertIn('compatible = "realtek,rtl8367b";',t);self.assertIn('cpu_port = <6>;',t);self.assertIn('gpio-sck = <&gpio1 24 GPIO_ACTIVE_HIGH>;',t);self.assertIn('gpio-sda = <&gpio1 23 GPIO_ACTIVE_HIGH>;',t);self.assertIn('gpios = <&gpio1 4 GPIO_ACTIVE_LOW>;',t)
  def test_34b_dts_clean_console_bootargs(self):
-  t=(ROOT/'RSD0614.dts').read_text();self.assertIn('bootargs = "console=ttyS0,115200 initcall_debug ignore_loglevel";',t);self.assertNotIn('keep_bootcon',t)
+  t=(ROOT/'RSD0614.dts').read_text();self.assertIn('bootargs = "console=ttyS0,115200";',t);self.assertNotIn('keep_bootcon',t)
  def test_34c_dts_spi0_enabled_conservative_readonly_only(self):
   t=(ROOT/'RSD0614.dts').read_text();self.assertRegex(t,r'&spi0\s*\{[^}]*status = "okay";');self.assertIn('compatible = "jedec,spi-nor";',t);self.assertIn('spi-max-frequency = <25000000>;',t)
  def test_35_source_commit_locks_preserved(self):

@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.4.2",
+  "bundle_version": "5.5.0",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 127,
+  "regression_tests_per_run": 128,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (GitHub Actions run #45087657332: 2,934,544 bytes / 0x2CC710, SHA-256 ba761d13f34b492f220c599ec16e2747344f9169e0481edccba56214c73bbef2, 27/27 deep_audit PASS)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.4.2",
+  "openwrt_compile": "NOT YET VERIFIED FOR v5.5.0",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.5.0",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.4.1 on physical Rock Space RSD0614 V1.0: PASS for clean ttyS0 (no keep_bootcon, irq17=105, ERR=0), BH25Q64 8MiB SPI NOR (div 28, mtd0..mtd5 flags=0x800 read-only, mtd2ro cr6c start=0x80a00000 burn=0x30000 len=0x256c02), passive HW survey (BOND_OPTION=0x4 97FN, PINMUX_SEL2=0x0, RGMII_PAD_CTRL=0x579fff7f, P0GMIICR=0x00037d57 RXdly=7, PCRP0=0x16972039, EXTPCR0=0xc0000, PSRP0=0x307a 1000M/FD), and button GPIO1_4 (PE4 active-low, xor=0x10); probe-all halted after smi due to split-newline write -EINVAL and PINMUX_SEL2=0x0 (fixed in v5.4.2)",
-  "preflight": "PASS (127/127 local & CI regression tests)",
-  "previous_build_result": "v5.4.1 run 45080096276: compile, audit (27/27), zstd cache population, and physical RAM-boot passive/button survey PASSED"
+  "previous_hardware_result": "v5.4.1 & v5.4.2 on physical Rock Space RSD0614 V1.0: PASS end-to-end — clean ttyS0, BH25Q64 8MiB SPI NOR (6 ro MTDs), button GPIO1_4 (PE4 active-low), RTL8367S switch (0x6367/0x0020 on smi_pefgh_24_23 SCK=PH0/SDA=PG7, EXT1 cpu_port=6, LAN 0..3=0xef, WAN 4=0xf0, P0GMIICR=0x00037d57 RXdly=7, PAD=0x579fff7f), on-SoC WMAC alive as RTL8197G (HAL_HW_TYPE_ID=0x15/21, cut=1, strap=4 97FN), and PCIe0 40MHz Link UP (LTSSM=0x030e9d11, rc_id=0x819710ec, ep_id=0xb81410ec RTL8814BR)",
+  "preflight": "PASS (128/128 local & CI regression tests)",
+  "previous_build_result": "v5.4.2 run 45087657332: compile, audit (27/27), SHA-256 ba761d13f34b492f220c599ec16e2747344f9169e0481edccba56214c73bbef2, and physical RAM-boot probe-all (smi+wmac+pcie0) PASSED"
 }

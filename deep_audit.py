@@ -169,7 +169,7 @@ def audit(image):
     def check(name,ok,detail=''):checks.append({'check':name,'pass':bool(ok),'detail':detail})
     check('target-compatible',b'rockspace,rsd0614\0' in tree['/'].get('compatible',b''));check('target-model',tree['/'].get('model')==b'Rock Space RSD0614 V1.0\0')
     memories=[p for p in tree.values() if p.get('device_type')==b'memory\0'];check('64MiB-memory',len(memories)==1 and memories[0].get('reg')==struct.pack('>II',0,0x4000000))
-    check('UART-115200-initcall-debug',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200 initcall_debug ignore_loglevel\0')
+    check('UART-115200-clean',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200\0')
     uart=tree.get('/serial@18147000',{})
     uart_compat=uart.get('compatible',b'')
     check('RTL8197F-UART-exact-geometry',
@@ -186,7 +186,24 @@ def audit(image):
           nor.get('compatible')==b'jedec,spi-nor\0' and
           nor.get('reg')==struct.pack('>I',0) and
           nor.get('spi-max-frequency')==struct.pack('>I',25000000))
-    for path in ('/pcie-controller@18b00000','/pcie-controller@18b20000','/wmac@18640000','/ethernet@18010000'):check('disabled:'+path,tree.get(path,{}).get('status')==b'disabled\0')
+    gpio0=tree.get('/soc/gpio-controller@3500',{});gpio1=tree.get('/soc/gpio-controller@351C',{})
+    rstbtn=tree.get('/gpio-keys-polled/reset',{})
+    sw=tree.get('/rtl8367b',{});pclk=tree.get('/pcie_clk',{})
+    check('GPIO-and-verified-reset-button',
+          gpio0.get('status')==b'okay\0' and gpio1.get('status')==b'okay\0' and
+          rstbtn.get('label')==b'reset\0' and
+          rstbtn.get('linux,code')==struct.pack('>I',0x198) and
+          len(rstbtn.get('gpios',b''))==12 and struct.unpack('>II',rstbtn['gpios'][4:])==(4,1))
+    check('RTL8367S-switch-exact-SMI-and-cpu-port',
+          sw.get('compatible')==b'realtek,rtl8367b\0' and
+          sw.get('cpu_port')==struct.pack('>I',6) and
+          len(sw.get('gpio-sck',b''))==12 and struct.unpack('>II',sw['gpio-sck'][4:])==(24,0) and
+          len(sw.get('gpio-sda',b''))==12 and struct.unpack('>II',sw['gpio-sda'][4:])==(23,0))
+    check('enabled:/ethernet@18010000',tree.get('/ethernet@18010000',{}).get('status')==b'okay\0')
+    check('enabled:/pcie-controller@18b00000-40MHz',
+          tree.get('/pcie-controller@18b00000',{}).get('status')==b'okay\0' and
+          pclk.get('clock-frequency')==struct.pack('>I',40000000))
+    for path in ('/pcie-controller@18b20000','/wmac@18640000'):check('disabled:'+path,tree.get(path,{}).get('status')==b'disabled\0')
     parts={}
     for path,props in tree.items():
         if '/partition@' in path:
@@ -200,8 +217,18 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtl8192cd')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.4.2-omnibus-readonly-survey\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
-    network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network));check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.5.0-wired-pcie-ramboot\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net')
+    check('rsd0614-wired-network-config',
+          b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
+          b'02:06:14:00:00:01' in boardnet and b'02:06:14:00:00:02' in boardnet and
+          b"ports='4 6t'" in ucinet and b"ports='0 1 2 3 6t'" in ucinet and b"ipaddr='192.168.1.1'" in ucinet and
+          'etc/config/network' not in byname and
+          netinit is not None and (netinit['mode']&0o777)==0o755 and
+          b'USE_PROCD' not in netinit['data'] and b'hwnat' in netinit['data'] and
+          b'fabric_gw_rearm' in netinit['data'] and b'rtl865x_gw' not in netinit['data'] and
+          b'swconfig dev switch0 set apply 1' in netinit['data'])
+    check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     survey=byname.get('usr/sbin/rsd0614-survey')
     check('omnibus-survey-tool-executable',survey is not None and stat.S_ISREG(survey['mode']) and (survey['mode']&0o777)==0o755 and survey['data'].startswith(b'#!/bin/sh\n') and b'/proc/rsd0614_hw_survey' in survey['data'] and b'/dev/mtdblock' not in survey['data'])
     auto_survey=[n for n in byname if (n.startswith(('etc/rc.d/','etc/init.d/')) and 'survey' in n.lower()) or (n.startswith(('lib/preinit/','etc/init.d/')) and b'rsd0614-survey' in byname[n].get('data',b'')) or (n=='etc/rc.local' and b'rsd0614-survey' in byname[n].get('data',b''))]

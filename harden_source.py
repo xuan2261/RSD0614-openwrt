@@ -2,14 +2,14 @@
 """Isolate the dedicated RSD0614 source tree. Does not contact a router."""
 from pathlib import Path
 import argparse,hashlib,json,os,re,shutil,subprocess,tempfile
-BASE='8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67'; SURVEY_PATCH_NAME='9997-rsd0614-hw-survey-diag.patch'; PATCH_NAME='9999-rsd0614-bh25q64-read-profile.patch'; UART_PATCH_NAME='9998-rtl8197f-uart-busy-replay.patch'; UART_DIAG_PATCH_NAME='9998z-rtl8197f-uart-irq-cause-diag.patch'; UART_FIX_PATCH_NAME='9998zz-rtl8197f-uart-register-semantics.patch'
+BASE='8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67'; VG_RGMII_PCIE_PATCH_NAME='9996-rsd0614-vg-rgmii-and-pcie.patch'; SURVEY_PATCH_NAME='9997-rsd0614-hw-survey-diag.patch'; PATCH_NAME='9999-rsd0614-bh25q64-read-profile.patch'; UART_PATCH_NAME='9998-rtl8197f-uart-busy-replay.patch'; UART_DIAG_PATCH_NAME='9998z-rtl8197f-uart-irq-cause-diag.patch'; UART_FIX_PATCH_NAME='9998zz-rtl8197f-uart-register-semantics.patch'
 BOOT_MOUNT_ROOT_LINE="\t[ -f /proc/mounts ] || /sbin/mount_root\n"
-BOOT_SAFE_LINE="\t# RSD0614 RAM-only diagnostic: persistent-root fallback disabled.\n"
+BOOT_SAFE_LINE="\t# RSD0614 RAM-only bring-up: persistent-root fallback disabled.\n"
 DEFAULT_NETWORK_UNSAFE="ucidef_set_interface_lan 'eth0'\n[ -d /sys/class/net/eth1 ] && ucidef_set_interface_wan 'eth1'\n"
-DEFAULT_NETWORK_SAFE="# RSD0614 RAM-only diagnostic: do not synthesize physical interfaces.\n"
+DEFAULT_NETWORK_SAFE="# RSD0614 RAM-only bring-up: 02_network + 99-rsd0614-network own eth0.2/eth0.1.\n"
 IRQ_UNSAFE_BLOCK="\tic_w32(BIT(15)|BIT(21)|BIT(29), REALTEK_IC_REG_MASK);\n\tic_w32(BIT(15), REALTEK_IC_REG2_MASK);\n\n\t// Return only MARK1\n\treturn BIT(15)|BIT(21)|BIT(29);"
-IRQ_SAFE_BLOCK="\t/*\n\t * RSD0614 serial-only diagnostic: the bootloader has just used\n\t * Ethernet for TFTP, while NET/PCIe/WMAC drivers are deliberately\n\t * disabled. Clear and keep their direct interrupt sources masked so\n\t * stale bootloader state cannot create an unowned interrupt storm.\n\t */\n\tic_w32(BIT(15)|BIT(21)|BIT(29), REALTEK_IC_REG_STATUS);\n\tic_w32(0, REALTEK_IC_REG_MASK);\n\tic_w32(BIT(15), REALTEK_IC_REG2_MASK);\n\n\treturn 0;"
-DISABLE_KERNEL=('CONFIG_NET_RTL819X','CONFIG_RTL8197F_WMAC','CONFIG_RTL8192CD','CONFIG_RTL8366_SMI','CONFIG_RTL8367B_PHY','CONFIG_MTD_SPLIT_FIRMWARE','CONFIG_MTD_SPLIT_CVIMG_FW')
+IRQ_SAFE_BLOCK="\t/*\n\t * RSD0614 M2 RAM-boot: clear stale bootloader pending IRQs first.\n\t * PCIe0 (BIT(21)->IP5) is enabled; NET (BIT(15)->IP4) is armed by\n\t * rtl865x_start() on eth0 open and included in mips_chip_irqs so IP2\n\t * ignores it; WMAC (BIT(29)->IP6) stays masked until M3 Wi-Fi.\n\t */\n\tic_w32(BIT(15)|BIT(21)|BIT(29), REALTEK_IC_REG_STATUS);\n\tic_w32(BIT(21), REALTEK_IC_REG_MASK);\n\tic_w32(BIT(15), REALTEK_IC_REG2_MASK);\n\n\treturn BIT(15)|BIT(21);"
+DISABLE_KERNEL=('CONFIG_RTL8197F_WMAC','CONFIG_RTL8192CD','CONFIG_MTD_SPLIT_FIRMWARE','CONFIG_MTD_SPLIT_CVIMG_FW')
 SURVEY_SCRIPT="""#!/bin/sh
 # On-demand read-only hardware qualification collector for Rock Space RSD0614 V1.0.
 # Never executed automatically at boot. Never writes flash or prints device-unique secrets.
@@ -236,7 +236,85 @@ case "$cmd" in
 \t\t;;
 esac
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.4.2-omnibus-readonly-survey\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only diagnostic: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':'#!/bin/sh\n# Diagnostic image: no physical network interfaces.\nexit 0\n','etc/config/network':"config interface 'loopback'\n\toption device 'lo'\n\toption ifname 'lo'\n\toption proto 'static'\n\toption ipaddr '127.0.0.1'\n\toption netmask '255.0.0.0'\n",'etc/rc.local':'#!/bin/sh\n# No donor ASIC or Wi-Fi startup.\nexit 0\n','lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BOARD_02_NETWORK="""#!/bin/sh
+. /lib/functions.sh
+. /lib/functions/uci-defaults.sh
+
+board_config_update
+board=$(cat /tmp/sysinfo/board_name 2>/dev/null)
+
+case "$board" in
+rockspace,rsd0614)
+\t# Hardware-verified RTL8367S (cpu_port=6) + SoC CPU-tag VLAN layout:
+\t# eth0.2 = LAN (VID2, ports 0..3), eth0.1 = WAN (VID1, port 4).
+\t# Deterministic locally-administered MACs (LAN != WAN; zero device secrets).
+\tucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
+\tucidef_set_interface_macaddr "lan" "02:06:14:00:00:01"
+\tucidef_set_interface_macaddr "wan" "02:06:14:00:00:02"
+\t;;
+esac
+
+board_config_flush
+exit 0
+"""
+UCI_99_NETWORK="""#!/bin/sh
+# Configure RTL8367S switch0 VLANs (VID1=WAN port 4, VID2=LAN ports 0..3,
+# trunk cpu_port=6 tagged) and RAM-boot LAN/WAN interfaces cleanly.
+[ "$(uci -q get system.@system[0].rsd0614_m2_seeded)" = "1" ] && exit 0
+
+uci -q batch <<'EOF'
+delete network.@switch[0]
+delete network.@switch_vlan[0]
+delete network.@switch_vlan[0]
+add network switch
+set network.@switch[-1].name='switch0'
+set network.@switch[-1].reset='1'
+set network.@switch[-1].enable_vlan='1'
+add network switch_vlan
+set network.@switch_vlan[-1].device='switch0'
+set network.@switch_vlan[-1].vlan='1'
+set network.@switch_vlan[-1].vid='1'
+set network.@switch_vlan[-1].ports='4 6t'
+add network switch_vlan
+set network.@switch_vlan[-1].device='switch0'
+set network.@switch_vlan[-1].vlan='2'
+set network.@switch_vlan[-1].vid='2'
+set network.@switch_vlan[-1].ports='0 1 2 3 6t'
+set network.lan='interface'
+set network.lan.type='bridge'
+set network.lan.ifname='eth0.2'
+set network.lan.proto='static'
+set network.lan.ipaddr='192.168.1.1'
+set network.lan.netmask='255.255.255.0'
+set network.lan.macaddr='02:06:14:00:00:01'
+set network.wan='interface'
+set network.wan.ifname='eth0.1'
+set network.wan.proto='dhcp'
+set network.wan.macaddr='02:06:14:00:00:02'
+commit network
+set system.@system[0].hostname='RSD0614-OpenWrt'
+set system.@system[0].rsd0614_m2_seeded='1'
+commit system
+EOF
+exit 0
+"""
+INIT_RSD0614_NET="""#!/bin/sh /etc/rc.common
+# Rock Space RSD0614 V1.0 M2 wired bring-up (plain L2 + Linux routing/NAT;
+# keeps hardware NAT offload and DIR-842 gw_prog off so L2 aging stays active).
+START=97
+
+start() {
+\t[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
+\t[ -w /sys/module/rtl819x/parameters/fabric_gw_rearm ] && echo 0 > /sys/module/rtl819x/parameters/fabric_gw_rearm
+\tswconfig dev switch0 set apply 1 >/dev/null 2>&1 || true
+\tlogger -t rsd0614-net "RTL8367S switch0 applied; hwnat=0 fabric_gw_rearm=0 lan=$(cat /sys/class/net/eth0.2/address 2>/dev/null || echo none)"
+}
+
+stop() {
+\t[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
+}
+"""
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.5.0-wired-pcie-ramboot\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC or Wi-Fi startup.\nexit 0\n','lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)
@@ -278,9 +356,10 @@ def harden(tree,port,audit,expected=BASE):
     if tree==audit or tree in audit.parents:raise ValueError('Audit backup must be outside OpenWrt source tree')
     head=subprocess.check_output(['git','-C',str(tree),'rev-parse','HEAD'],text=True).strip()
     if head!=expected:raise ValueError('Unexpected base revision; no changes made')
-    target=checked_path(tree,'target/linux/realtek');old=checked_path(tree,'target/linux/realtek/base-files');mk=checked_path(tree,'target/linux/realtek/image/Makefile');cfg=checked_path(tree,'target/linux/realtek/rtl8197f/config-4.14');irq=checked_path(tree,'target/linux/realtek/files-4.14/arch/mips/realtek/irq.c');boot=checked_path(tree,'package/base-files/files/etc/init.d/boot');defaultnet=checked_path(tree,'package/base-files/files/etc/board.d/99-default_network');surveypatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+SURVEY_PATCH_NAME);patch=checked_path(tree,'target/linux/realtek/patches-4.14/'+PATCH_NAME);uartpatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_PATCH_NAME);uartdiag=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_DIAG_PATCH_NAME);uartfix=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_FIX_PATCH_NAME)
-    newmk=patch_image_makefile(mk.read_text());newcfg=patch_kernel_config(cfg.read_text());newirq=patch_irq_source(irq.read_text());newboot=patch_boot_script(boot.read_text());newdefaultnet=patch_default_network_script(defaultnet.read_text());surveypatchdata=(port/'patches'/SURVEY_PATCH_NAME).read_bytes();patchdata=(port/'patches'/PATCH_NAME).read_bytes();uartpatchdata=(port/'patches'/UART_PATCH_NAME).read_bytes();uartdiagdata=(port/'patches'/UART_DIAG_PATCH_NAME).read_bytes();uartfixdata=(port/'patches'/UART_FIX_PATCH_NAME).read_bytes()
+    target=checked_path(tree,'target/linux/realtek');old=checked_path(tree,'target/linux/realtek/base-files');mk=checked_path(tree,'target/linux/realtek/image/Makefile');cfg=checked_path(tree,'target/linux/realtek/rtl8197f/config-4.14');irq=checked_path(tree,'target/linux/realtek/files-4.14/arch/mips/realtek/irq.c');boot=checked_path(tree,'package/base-files/files/etc/init.d/boot');defaultnet=checked_path(tree,'package/base-files/files/etc/board.d/99-default_network');vgpatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+VG_RGMII_PCIE_PATCH_NAME);surveypatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+SURVEY_PATCH_NAME);patch=checked_path(tree,'target/linux/realtek/patches-4.14/'+PATCH_NAME);uartpatch=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_PATCH_NAME);uartdiag=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_DIAG_PATCH_NAME);uartfix=checked_path(tree,'target/linux/realtek/patches-4.14/'+UART_FIX_PATCH_NAME)
+    newmk=patch_image_makefile(mk.read_text());newcfg=patch_kernel_config(cfg.read_text());newirq=patch_irq_source(irq.read_text());newboot=patch_boot_script(boot.read_text());newdefaultnet=patch_default_network_script(defaultnet.read_text());vgpatchdata=(port/'patches'/VG_RGMII_PCIE_PATCH_NAME).read_bytes();surveypatchdata=(port/'patches'/SURVEY_PATCH_NAME).read_bytes();patchdata=(port/'patches'/PATCH_NAME).read_bytes();uartpatchdata=(port/'patches'/UART_PATCH_NAME).read_bytes();uartdiagdata=(port/'patches'/UART_DIAG_PATCH_NAME).read_bytes();uartfixdata=(port/'patches'/UART_FIX_PATCH_NAME).read_bytes()
     if not old.is_dir():raise ValueError('Target userspace tree absent')
+    if vgpatch.exists() and vgpatch.read_bytes()!=vgpatchdata:raise ValueError('A different RSD0614 VG RGMII/PCIe patch already exists')
     if surveypatch.exists() and surveypatch.read_bytes()!=surveypatchdata:raise ValueError('A different RSD0614 hardware survey patch already exists')
     if patch.exists() and patch.read_bytes()!=patchdata:raise ValueError('A different BH25Q64 patch already exists')
     if uartpatch.exists() and uartpatch.read_bytes()!=uartpatchdata:raise ValueError('A different RTL8197F UART patch already exists')
@@ -295,9 +374,9 @@ def harden(tree,port,audit,expected=BASE):
             if tree_records(backup)!=existing:raise ValueError('Conflicting retained-source backup')
             shutil.rmtree(old)
         else:old.rename(backup)
-        stage.rename(old);mk.write_text(newmk,encoding='utf-8');cfg.write_text(newcfg,encoding='utf-8');irq.write_text(newirq,encoding='utf-8');boot.write_text(newboot,encoding='utf-8');defaultnet.write_text(newdefaultnet,encoding='utf-8');patch.parent.mkdir(parents=True,exist_ok=True);surveypatch.write_bytes(surveypatchdata);patch.write_bytes(patchdata);uartpatch.write_bytes(uartpatchdata);uartdiag.write_bytes(uartdiagdata);uartfix.write_bytes(uartfixdata)
-        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'NET/PCIe/WiFi pending cleared and masked','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'eth0/eth1 synthesis suppressed','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
-        (audit/'latest-source-isolation.json').write_text(json.dumps(result,indent=2)+'\n');print('SOURCE_ISOLATION: PASS (source mutation only, not a firmware boot test)');print('DEVICE_VARS includes DEV_PROFILE: PASS');print('RSD0614 omnibus read-only hardware survey patch staged: PASS; target runtime NOT YET VERIFIED');print('BH25Q64 kernel patch staged: PASS; target probe NOT YET VERIFIED');print('RTL8197F BUSY-replay delta staged after base 0004: PASS');print('RTL8197F bounded IRQ-cause diagnostic staged: PASS');print('RTL8197F runtime SoC-ID UART dispatch staged: PASS; hardware validation NOT YET VERIFIED');return result
+        stage.rename(old);mk.write_text(newmk,encoding='utf-8');cfg.write_text(newcfg,encoding='utf-8');irq.write_text(newirq,encoding='utf-8');boot.write_text(newboot,encoding='utf-8');defaultnet.write_text(newdefaultnet,encoding='utf-8');patch.parent.mkdir(parents=True,exist_ok=True);vgpatch.write_bytes(vgpatchdata);surveypatch.write_bytes(surveypatchdata);patch.write_bytes(patchdata);uartpatch.write_bytes(uartpatchdata);uartdiag.write_bytes(uartdiagdata);uartfix.write_bytes(uartfixdata)
+        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','vg_rgmii_pcie':'RTL8197FH-VG RGMII pad preservation (0x579fff7f), PITCR CF_FIX_IPG=1, P0GMIICR RX_delay=7, fabric_gw_rearm=0, PCIe0 40MHz VG MDIO 0x08=0x3101','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'stale pending cleared; PCIe0 BIT(21) enabled; NET BIT(15) armed by rtl865x_start and ignored on IP2; WMAC BIT(29) kept masked','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'generic eth0/eth1 synthesis suppressed; RSD0614 02_network + 99-rsd0614-network + rsd0614-net own switch0/eth0.2/eth0.1','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
+        (audit/'latest-source-isolation.json').write_text(json.dumps(result,indent=2)+'\n');print('SOURCE_ISOLATION: PASS (source mutation only, not a firmware boot test)');print('DEVICE_VARS includes DEV_PROFILE: PASS');print('RSD0614 VG RGMII/PCIe0 patch staged: PASS; target runtime NOT YET VERIFIED');print('RSD0614 omnibus read-only hardware survey patch staged: PASS; target runtime NOT YET VERIFIED');print('BH25Q64 kernel patch staged: PASS; target probe NOT YET VERIFIED');print('RTL8197F BUSY-replay delta staged after base 0004: PASS');print('RTL8197F bounded IRQ-cause diagnostic staged: PASS');print('RTL8197F runtime SoC-ID UART dispatch staged: PASS; hardware validation NOT YET VERIFIED');return result
     finally:
         if stage.exists():shutil.rmtree(stage)
 if __name__=='__main__':

@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PENDING CI RUN FOR v5.6.1",
+  "openwrt_compile": "PASS (CI run 45434537894, 6m19s warm cache, 4183280 bytes / 0x003FD4F0, decoded_size 14397593 bytes / 13.73 MiB, SHA-256 5a7d31aa451fd386e1063a5fe0f73ba218359f9fd5c3e02e4e739cee2a7a5b35, deep_audit 31/31 PASS, rtl8192cd.ko ELF ksymtab 147/147 resolved / 0 missing / .bss 689648B)",
   "hardware_runtime": "NOT YET VERIFIED FOR v5.6.1",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
   "previous_hardware_result": "v5.6.0 physical RAM-boot verified wired Gigabit eth0 (newdesc=1, rx_pkts=649, runout=0, CPUIISR=00000000), RTL8367S, BH25Q64 6 read-only MTDs, LuCI/uhttpd + 40.9 MiB free RAM, and netifd UCI wireless parsing, while isolating two boot blockers fixed in v5.6.1: (1) rtl8192cd: Unknown symbol sk_pacing_shift_update (err 0), and (2) intermittent PCIe RC0 LTSSM=0x0c454504 (Polling.Config) link_up=0",
-  "preflight": "PASS (local regression tests)",
+  "preflight": "PASS (135/135 local & CI regression tests)",
   "previous_build_result": "v5.6.0 run 45399545588: compile (6m34s warm cache), deep_audit (30/30 PASS), 4179472 bytes / 0x003FC610, decoded_size 14394009 bytes (13.73 MiB), SHA-256 931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22"
 }

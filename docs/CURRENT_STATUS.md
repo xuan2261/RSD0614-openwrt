@@ -46,7 +46,7 @@ Consolidates all fixes for the `v5.6.0` boot log findings AND every latent runti
 ## Verification boundary
 
 - v5.3.9..v5.6.0 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), `RTL8197FH-VG` 6-dword `eth0` wired Gigabit (`ping 192.168.1.1` 1ms 0% loss, Dropbear SSH, `rx_pkts=649`, `runout=0`), `RTL8197G` WMAC (`HAL 0x15`), `PCIe0` (`10ec:b814`), and LuCI/`uhttpd` + 40.9 MiB free RAM on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.1 CI OpenWrt compile, ELF `__ksymtab` symbol check & `deep_audit.py`: **PENDING CI RUN**.
+- v5.6.1 CI OpenWrt compile, ELF `__ksymtab` symbol check (`147/147` resolved, `0` missing, `.bss=689,648` B / `673.5 KiB`) & `deep_audit.py` (`31/31`): **PASS** (GitHub Actions run `#45434537894`, `6m19s` warm cache, `4,183,280` bytes / `0x003FD4F0`, `decoded_size=14,397,593` bytes / `13.73 MiB`, SHA-256 `5a7d31aa451fd386e1063a5fe0f73ba218359f9fd5c3e02e4e739cee2a7a5b35`).
 - v5.6.1 dual-band Wi-Fi (`wlan0` 5 GHz + `wlan1` 2.4 GHz), hardened PCIe0 retry, and LuCI Wi-Fi config on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.1**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

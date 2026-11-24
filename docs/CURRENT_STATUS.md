@@ -37,7 +37,7 @@ Every verified wired/bus peripheral is consolidated into a single RAM-boot image
 ## Verification boundary
 
 - v5.3.9, v5.4.1 & v5.4.2 `ttyS0` shell, `spi0` `BH25Q64` read-only MTDs, passive `SYSC`/`PINMUX`/`GPIO`/`SWCORE` register survey, `GPIO1_4` button, `RTL8367S` (`smi_pefgh_24_23`), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` `10ec:b814` Link UP on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.5.0 CI OpenWrt compile & `deep_audit.py`: **NOT YET VERIFIED**.
+- v5.5.0 CI OpenWrt compile & `deep_audit.py` (`29/29`): **PASS** (GitHub Actions run `#45364422799`, `5m19s` warm cache, `2,959,120` bytes / `0x002D2710`, SHA-256 `b9795cc5bb5d400f2c88e38c3b99749103834fb12699bdd2a663ac5f0dfe36be`).
 - v5.5.0 wired Gigabit (`eth0.2`/`eth0.1`/`switch0`), Reset button, and `PCIe0` Linux driver runtime on physical RSD0614 V1.0: **NOT YET VERIFIED**.
 - Disabled board peripherals (`pcie1`, `wmac` `RTL8197G`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

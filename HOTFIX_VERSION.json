@@ -1,9 +1,9 @@
 {
-  "version": "5.6.0-m3-dualband-wifi-luci-ramboot",
-  "base": "5.5.1-vg-newdesc-ramboot",
-  "change": "Consolidated M3 RAM-boot build on top of hardware-verified v5.5.1 M2 wired Gigabit (ping 192.168.1.1 1ms 0% loss, Dropbear SSH reached, eth0 6-dword newdesc=1 rx_pkts=107 runout=0 CPUIISR=00000000): integrate out-of-tree pinned Realtek SDK v3.6.0 kmod-rtl8192cd-rsd0614 driving both PCIe0 RTL8814BR (5 GHz 4x4 VHT80 wlan0) and on-SoC RTL8197G (2.4 GHz 2x2 HT20 wlan1, WMAC enabled with GIMR BIT(29) armed on probe) via WEXT + in-kernel WPA2-PSK, read-only runtime /dev/mtd1 cfg calibration loader, atomic dual-band netifd handler, pinned OpenWrt 19.07 LuCI web GUI (uhttpd + luci), and wireless-tools/ethtool/iperf3; keep all 6 MTD partitions read-only, pcie1 disabled, unverified LEDs unclaimed, and persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v560-work",
-  "volume_label": "rsd0614.work=v5.6.0",
+  "version": "5.6.1-m3-wifi-pcie-hardened-ramboot",
+  "base": "5.6.0-m3-dualband-wifi-luci-ramboot",
+  "change": "Consolidated hardened M3 RAM-boot build fixing every runtime issue observed in v5.6.0 physical boot log and parallel full-stack code audit: (1) guard sk_pacing_shift_update for Linux 4.14.187 (sole missing symbol blocking rtl8192cd.ko load) + fail-closed ELF32-LE SHN_UNDEF vs vmlinux __ksymtab verifier; (2) enable CONFIG_RTL_SHRINK_MEMORY_SIZE=y with 256 TX/RX rings and 2600B RX SKBs (fits 64 MiB DDR2 + initramfs without order-10 GFP_ATOMIC OOM); (3) enable coherent TXBD/TXDESC/beacon DMA for RTL8814B and fix MIPS32 >>32 UB, InterruptMaskExt typo, GIMR BIT(29) post-request_irq unmask lifecycle, 0xB8000064 readback fence, colon-MAC/fallback tolerance in cfg loader, and mibstr buffer bounds; (4) synchronize PCIe0 PWRCR/PERST# reset with readback fences and 3-attempt bounded retry (eliminates LTSSM 0x0c454504 Polling.Config race); (5) silence steady-state rtl819x DP poll#/isr# UART spam via dp_heartbeat=0; (6) fix rtl8192cd.sh 2ndchoffset/psk-mixed encmode=4/explicit MIB defaults and patch LuCI wireless.js with rtl8192cd WPA2/PSK modes; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v561-work",
+  "volume_label": "rsd0614.work=v5.6.1",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -19,7 +19,8 @@
     "rsd0614-openwrt-v541-work",
     "rsd0614-openwrt-v542-work",
     "rsd0614-openwrt-v550-work",
-    "rsd0614-openwrt-v551-work"
+    "rsd0614-openwrt-v551-work",
+    "rsd0614-openwrt-v560-work"
   ],
   "persistent_flash": "NO-GO"
 }

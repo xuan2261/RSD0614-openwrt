@@ -12,10 +12,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.6.0",
+  "bundle_version": "5.6.1",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "M3 consolidated RAM-only dual-band Wi-Fi + LuCI 19.07 + wired Gigabit candidate (v5.6.0-m3-dualband-wifi-luci-ramboot) built atop hardware-verified M2 v5.5.1 wired Gigabit (1ms ping, 0% loss, Dropbear SSH, 6-dword newdesc NIC, RTL8367S, PCIe0 10ec:b814, clean ttyS0, BH25Q64 6 read-only MTDs): adds out-of-tree pinned Realtek SDK v3.6.0 kmod-rtl8192cd-rsd0614 driving BOTH PCIe0 RTL8814BR (10ec:b814, 5 GHz 4x4 wlan0, IRQ 5) and on-SoC RTL8197G (HAL 0x15, 2.4 GHz 2x2 wlan1, 0x18640000 256KiB, IRQ 6 / GIMR BIT(29) armed at WMAC probe) with WEXT + in-kernel WPA2-PSK, read-only runtime /dev/mtd1 cfg tenda-kv RF calibration/MAC loader, hardware SR+0x0c bond strap, dual-band atomic netifd wireless handler (/lib/netifd/wireless/rtl8192cd.sh, /etc/Wireless -> /tmp/Wireless), pinned openwrt-19.07 LuCI web UI (uhttpd + luci), wireless-tools, ethtool, and iperf3; all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, all auto mount_root and MTD splitters stay suppressed, persistent flash stays NO-GO"
+  "intent": "M3 hardened RAM-only dual-band Wi-Fi + LuCI 19.07 + wired Gigabit candidate (v5.6.1-m3-wifi-pcie-hardened-ramboot): fixes every runtime issue isolated from v5.6.0 physical boot log and full-stack audit — Linux 4.14.187 sk_pacing_shift_update guard + fail-closed ELF32-LE ksymtab audit, 64 MiB DDR2 memory shrink (CONFIG_RTL_SHRINK_MEMORY_SIZE=y, 256 TX/RX rings, 2600B RX SKBs), RTL8814BR coherent TXBD/TXDESC/beacon DMA + MIPS32 shift fix, RTL8197G WMAC GIMR BIT(29) post-request_irq unmask + 0xB8000064 readback fence + InterruptMaskExt fix, read-only /dev/mtd1 cfg loader colon-MAC/fallback tolerance, synchronized PCIe0 PWRCR/PERST# reset with 3-attempt bounded retry (eliminates LTSSM 0x0c454504 race), rtl819x-eth dp_heartbeat=0 console spam silencer, hardened lib/netifd/wireless/rtl8192cd.sh (2ndchoffset/psk-mixed encmode=4/explicit MIB defaults), and LuCI wireless.js rtl8192cd WPA2/PSK encryption options; all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, all auto mount_root and MTD splitters stay suppressed, persistent flash stays NO-GO"
 }

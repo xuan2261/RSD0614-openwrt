@@ -71,6 +71,30 @@ printf 'src-link luci %s\nsrc-link packages %s\n' "$LUCI_DIR" "$PACKAGES_DIR" > 
     ./scripts/feeds update luci packages
     ./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap luci-app-firewall luci-proto-ppp cgi-io
 )
+python3 - "$OPENWRT_DIR/feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\tcrypto_modes.push(['psk2',      'WPA2-PSK',                    35]);
+\t\t\t\t\tcrypto_modes.push(['psk-mixed', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',       'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+if "hwtype == 'rtl8192cd'" not in text:
+    anchor = """\t\t\t\telse if (hwtype == 'broadcom') {
+\t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
+\t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
+\t\t\t\t\tcrypto_modes.push(['psk',      'WPA-PSK',                     21]);
+\t\t\t\t}
+"""
+    if text.count(anchor) != 1:
+        raise SystemExit(f"Expected single broadcom crypto_modes anchor in {p}, found {text.count(anchor)}")
+    text = text.replace(anchor, anchor + snippet, 1)
+    p.write_text(text)
+assert "hwtype == 'rtl8192cd'" in p.read_text()
+print("LUCI_WIRELESS_JS_RTL8192CD: PASS")
+PY
 printf '%s\n' "$fingerprint" > "$WORK_DIR/.port-fingerprint"
 zst_decompress() {
     local src=$1

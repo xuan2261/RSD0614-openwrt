@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.6.0",
+  "bundle_version": "5.6.1",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 131,
+  "regression_tests_per_run": 135,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (CI run 45399545588, 6m34s warm cache, 4179472 bytes / 0x003FC610, decoded_size 14394009 bytes / 13.73 MiB, SHA-256 931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22, deep_audit 30/30 PASS)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.0",
+  "openwrt_compile": "PENDING CI RUN FOR v5.6.1",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.1",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.5.1 M2 100% VERIFIED on physical Rock Space RSD0614 V1.0: RTL8197FH-VG 6-dword new-descriptor eth0 (newdesc=1, CPUICR1=0x001861d3, rx_pkts=107, runout=0, CPUIISR=00000000, FCS wedge detector armed), RTL8367S Gigabit switch (VLAN 1 WAN / VLAN 2 LAN, 1000M/FD), PCIe0 (10ec:b814 RTL8814BR BAR0/BAR2 assigned), ping 192.168.1.1 = 4/4 replies (1ms, 0% loss), and Dropbear SSH reached cleanly with zero kernel oops or errors",
-  "preflight": "PASS (131/131 local & CI regression tests)",
-  "previous_build_result": "v5.5.1 run 45379106697: compile (5m02s warm cache), deep_audit (29/29 PASS), 2960336 bytes / 0x002D2BD0, SHA-256 7bde54541c710954f59e7549f0b130ae46030a8de7b9cc779352a8e31280df65; physical RAM-boot verified M2 wired Gigabit end-to-end"
+  "previous_hardware_result": "v5.6.0 physical RAM-boot verified wired Gigabit eth0 (newdesc=1, rx_pkts=649, runout=0, CPUIISR=00000000), RTL8367S, BH25Q64 6 read-only MTDs, LuCI/uhttpd + 40.9 MiB free RAM, and netifd UCI wireless parsing, while isolating two boot blockers fixed in v5.6.1: (1) rtl8192cd: Unknown symbol sk_pacing_shift_update (err 0), and (2) intermittent PCIe RC0 LTSSM=0x0c454504 (Polling.Config) link_up=0",
+  "preflight": "PASS (local regression tests)",
+  "previous_build_result": "v5.6.0 run 45399545588: compile (6m34s warm cache), deep_audit (30/30 PASS), 4179472 bytes / 0x003FC610, decoded_size 14394009 bytes (13.73 MiB), SHA-256 931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22"
 }

@@ -1,29 +1,129 @@
-From: Rock Space RSD0614 V1.0 OpenWrt RAM-Boot Port
-Subject: [PATCH] realtek: RTL8197FH-VG 6-dword new-descriptor NIC, RGMII trunk, and 40 MHz PCIe0
-
-1. drivers/net/ethernet/rtl819x/{rtl819x_regs.h,rtl819x_swnic.h,rtl819x_swnic.c,rtl819x-eth.c}:
-   - Native 6-dword (24-byte) single-level new-descriptor RX/TX engine for
-     RTL8197FH-VG (soc_id 0x81970001), matching bootloader/SDK v3.6.0 CPUICR1
-     (0x001861d3: CF_RXDESC=6, CF_TXDESC=6, TX_PKTHDR_SHORTCUT_LSO),
-     DMA_CR1=(txCnt-1)*24, DMA_CR4=TX_RING0_TAIL_AWARE, TXRINGCR=TX_RING0_EN,
-     CPUQDM0/2/4=0, and MACCTRL1|=CF_CMAC_CLK_SEL.
-   - Clean dual-mode selector (`desc_mode`: -1=auto 1 on VG / 0 on non-VG,
-     writable at runtime via /sys/module/rtl819x/parameters/desc_mode) with
-     legacy 2-level CPUICR1=0x00000082 fallback and safe ring-switch cleanup.
-   - Re-verify CPUICR1/DMA ring geometry after SIRR=TRXRDY (VG stopped-state
-     write-discard erratum), guard against persistent PKTHDR/MBUF_DESC_RUNOUT
-     ISR storms when rx_done==0, rate-limit ISR traces, and preserve VG RGMII
-     pad mux (0x579fff7f) + PITCR CF_FIX_IPG + RX delay 7.
-2. arch/mips/pci/pci-realtek.c:
-   - Program RTL8197FH-VG 40 MHz XTAL PCIe0 PHY PLL MDIO reg 0x08=0x3101 on
-     soc_id 0x81970000..0x81970fff (hardware-verified PCIe0 Link UP to 10ec:b814).
-
----
 diff --git a/arch/mips/pci/pci-realtek.c b/arch/mips/pci/pci-realtek.c
-index 3326987..9aefeb6 100644
+index 3326987..d3d4c1d 100644
 --- a/arch/mips/pci/pci-realtek.c
 +++ b/arch/mips/pci/pci-realtek.c
-@@ -294,6 +294,8 @@ static void realtek_pcie_reset(struct realtek_pci_controller *rpc)
+@@ -208,17 +208,16 @@ static struct pci_ops realtek_pci_ops = {
+ 
+ static int realtek_pcie_check_link(struct realtek_pci_controller *rpc)
+ {
+-	int i = 20;
++	int i;
+ 	u32 val = 0;
+ 
+-	do
+-	{
++	for (i = 0; i < 25; i++) {
+ 		val = __raw_readl(rpc->rc_cfg_base + 0x728);
+-		if((val & 0x1f) == 0x11)
++		if ((val & 0x1f) == 0x11)
+ 			return 1;
+ 
+-		mdelay(100);
+-	} while (i--);
++		mdelay(20);
++	}
+ 
+ 	return 0;
+ }
+@@ -228,16 +227,25 @@ static inline void realtek_pcie_device_reset(struct realtek_pci_controller *rpc)
+ 	u32 val;
+ 
+ 	/*
+-	 * Vendor "device reset": pulse SR PCIE_PHY0 (0xb8000050) bit1 - assert,
+-	 * hold ~300 ms, deassert. The old CLKMANAGE bit26 toggle here was a
+-	 * no-op for the PHY and never brought the RTL8822BE endpoint out of
+-	 * reset (LTSSM stuck at 0x02). This is the vendor stock-kernel behaviour.
++	 * Synchronized RC PHY reset + endpoint PERST# release:
++	 * Hold RC PHY in reset (PWRCR=0x01) while PERST# (SR PCIE_PHY0 bit1)
++	 * is asserted low for 290 ms, then release RC PHY (PWRCR=0x81) 10 ms
++	 * BEFORE releasing endpoint PERST#. This eliminates the Polling.Config
++	 * TS2 race (LTSSM=0x0c454504) caused by enabling LTSSM while PERST#
++	 * was still asserted for 300 ms.
+ 	 */
++	__raw_writel(0x01, rpc->rc_ext_base + 0x8);
++	(void)__raw_readl(rpc->rc_ext_base + 0x8);
+ 	val = sr_r32(REALTEK_SR_PCIE_PHY0);
+ 	sr_w32(val & ~BIT(1), REALTEK_SR_PCIE_PHY0);
+-	mdelay(300);
++	(void)sr_r32(REALTEK_SR_PCIE_PHY0);
++	mdelay(290);
++	__raw_writel(0x81, rpc->rc_ext_base + 0x8);
++	(void)__raw_readl(rpc->rc_ext_base + 0x8);
++	mdelay(10);
+ 	val = sr_r32(REALTEK_SR_PCIE_PHY0);
+ 	sr_w32(val | BIT(1), REALTEK_SR_PCIE_PHY0);
++	(void)sr_r32(REALTEK_SR_PCIE_PHY0);
+ }
+ 
+ static inline void realtek_pcie_mdio_reset(struct realtek_pci_controller *rpc)
+@@ -246,26 +254,35 @@ static inline void realtek_pcie_mdio_reset(struct realtek_pci_controller *rpc)
+ 	 * Release the PCIe PHY digital reset. THE key fix: the stock D-Link
+ 	 * kernel writes 8/9/0xb to SR+0x100 (0xb8000100) - the only code in the
+ 	 * whole vendor kernel that touches that register - NOT PCIE_PHY0 (0x50)
+-	 * as the old mainline code did. Without it the endpoint PHY stays held
+-	 * in reset and the link never leaves LTSSM polling.
++	 * as the old mainline code did. Readback barriers + 100 us hold ensure
++	 * non-posted MIPS writes are never coalesced across the reset strobe.
+ 	 */
+ 	sr_w32(0x8, REALTEK_SR_MDIORST);
++	(void)sr_r32(REALTEK_SR_MDIORST);
++	udelay(100);
+ 	sr_w32(0x9, REALTEK_SR_MDIORST);
++	(void)sr_r32(REALTEK_SR_MDIORST);
++	udelay(100);
+ 	sr_w32(0xb, REALTEK_SR_MDIORST);
++	(void)sr_r32(REALTEK_SR_MDIORST);
++	udelay(100);
+ }
+ 
+ static inline void realtek_pcie_phy_reset(struct realtek_pci_controller *rpc)
+ {
+ 	//(0x8 = PCIE0 PWRCR)
+ 	__raw_writel(0x01, rpc->rc_ext_base+0x8);	//bit7:PHY reset=0   bit0: Enable LTSSM=1
++	(void)__raw_readl(rpc->rc_ext_base+0x8);
++	mdelay(2);
+ 	__raw_writel(0x81, rpc->rc_ext_base+0x8);	//bit7:PHY reset=1   bit0: Enable LTSSM=1
++	(void)__raw_readl(rpc->rc_ext_base+0x8);
+ }
+ 
+ /*
+  * PCIe RC bring-up mirroring the stock D-Link kernel's pcie_init (reverse-
+- * engineered from the vendor vmlinux). This trains the RTL8822BE link on the
+- * DIR-842 (RTL8197F) where the previous hackpascal/SDK-derived sequence did
+- * not - verified on hardware via a live insmod harness before baking in here.
++ * engineered from the vendor vmlinux), hardened for RTL8197FH-VG + RTL8814BR
++ * with clean PERST# pre-assertion, CLKMANAGE BIT(14) reset cycle on retry,
++ * and synchronized PWRCR/PERST# release.
+  * Crystal (40 vs 25 MHz) is read from the bootstrap register, not the DTS clk.
+  */
+ static void realtek_pcie_reset(struct realtek_pci_controller *rpc)
+@@ -273,13 +290,25 @@ static void realtek_pcie_reset(struct realtek_pci_controller *rpc)
+ 	u32 val;
+ 	int is40 = !!(sr_r32(REALTEK_SR_REG_BOOTSTRAP) & REALTEK_SR_BS_40MHZ);
+ 
++	/* Assert endpoint PERST# first so a retry or warm boot starts cleanly */
++	val = sr_r32(REALTEK_SR_PCIE_PHY0);
++	sr_w32(val & ~BIT(1), REALTEK_SR_PCIE_PHY0);
++	(void)sr_r32(REALTEK_SR_PCIE_PHY0);
++
+ 	/* clock enable: vendor sets only bits 12,13,18 then 14 (NOT 19,20,26) */
+ 	val = sr_r32(REALTEK_SR_CLKMANAGE);
++	if (val & BIT(14)) {
++		sr_w32(val & ~BIT(14), REALTEK_SR_CLKMANAGE);
++		(void)sr_r32(REALTEK_SR_CLKMANAGE);
++		mdelay(10);
++	}
++	val = sr_r32(REALTEK_SR_CLKMANAGE);
+ 	val |= BIT(12)|BIT(13)|BIT(18);
+ 	sr_w32(val, REALTEK_SR_CLKMANAGE);
+ 	val = sr_r32(REALTEK_SR_CLKMANAGE);
+ 	val |= BIT(14);
+ 	sr_w32(val, REALTEK_SR_CLKMANAGE);
++	(void)sr_r32(REALTEK_SR_CLKMANAGE);
+ 	mdelay(10);
+ 
+ 	/* PHY digital-reset release (SR+0x100) - the mainline-missing step */
+@@ -294,16 +323,17 @@ static void realtek_pcie_reset(struct realtek_pci_controller *rpc)
  		realtek_pcie_mdio_write(rpc, 0x0f, 0x12f6);
  		realtek_pcie_mdio_write(rpc, 0x00, 0x0071);
  		realtek_pcie_mdio_write(rpc, 0x06, 0x1ac1);
@@ -32,11 +132,75 @@ index 3326987..9aefeb6 100644
  	} else {
  		realtek_pcie_mdio_write(rpc, 0x00, 0x0071);
  		realtek_pcie_mdio_write(rpc, 0x06, 0x18c1);
+ 	}
+ 	mdelay(10);
+ 
+-	realtek_pcie_phy_reset(rpc);	/* PWRCR pulse #2 */
+-
+-	realtek_pcie_device_reset(rpc);	/* SR PCIE_PHY0 bit1 clear/300ms/set */
+-	mdelay(10);
++	/* Synchronized PWRCR=0x01 + PERST#=0 (290 ms) -> PWRCR=0x81 (10 ms) -> PERST#=1 */
++	realtek_pcie_device_reset(rpc);
++	mdelay(20);
+ }
+ 
+ static void load_ranges(struct pci_controller *hose, struct device_node *node)
+@@ -390,31 +420,28 @@ static int realtek_pci_probe(struct platform_device *pdev)
+ 	rpc->pci_controller.mem_resource = &rpc->mem_res;
+ 	load_ranges(&rpc->pci_controller, pdev->dev.of_node);
+ 
+-	realtek_pcie_reset(rpc);
+-
+-	rpc->link_up = realtek_pcie_check_link(rpc);
+-	/*
+-	 * Diagnostic: dump the raw LTSSM/link register (rc_cfg + 0x728; low 5
+-	 * bits == 0x11 means L0 = trained) and the ref clock the PHY was tuned
+-	 * for. If the link is still down after the 25 MHz clock fix, this line
+-	 * shows WHICH state it's stuck in (0x0d detect / 0x1x config...) and
+-	 * confirms clk=25000000, without needing devmem in userspace.
+-	 */
+-	dev_info(&pdev->dev, "PCIe RC%d link check: LTSSM(0x728)=0x%08x clk=%luHz link_up=%d\n",
+-		 id, __raw_readl(rpc->rc_cfg_base + 0x728),
+-		 clk_get_rate(rpc->clk), rpc->link_up);
++	{
++		int attempt;
++
++		for (attempt = 1; attempt <= 3; attempt++) {
++			realtek_pcie_reset(rpc);
++			rpc->link_up = realtek_pcie_check_link(rpc);
++			dev_info(&pdev->dev, "PCIe RC%d link check: LTSSM(0x728)=0x%08x clk=%luHz link_up=%d (attempt %d/3)\n",
++				 id, __raw_readl(rpc->rc_cfg_base + 0x728),
++				 clk_get_rate(rpc->clk), rpc->link_up, attempt);
++			if (rpc->link_up)
++				break;
++		}
++	}
+ 	if (!rpc->link_up) {
+ 		/*
+-		 * Link never reached L0 (LTSSM != 0x11). Do NOT fall through to
+-		 * the dev_cfg0_base config read below: a config-space access to a
+-		 * downstream device that isn't there gets no PCIe completion and
+-		 * HARD-HANGS the CPU bus (no exception, no timeout, no recovery -
+-		 * observed on DIR-842 as a dead lock right after this warn). Bail
+-		 * cleanly instead so the kernel keeps booting AND the other root
+-		 * complex (pcie1@18b20000) still gets a chance to probe - the
+-		 * RTL8822BE may actually sit on that one.
++		 * Link never reached L0 (LTSSM != 0x11) after bounded retries.
++		 * Gate off CLKMANAGE BIT(14) and bail cleanly without reading
++		 * dev_cfg0_base (which would hang the CPU bus with no completion).
+ 		 */
+-		dev_warn(&pdev->dev, "PCIe link is down - skipping bus (no device)\n");
++		val = sr_r32(REALTEK_SR_CLKMANAGE);
++		sr_w32(val & ~BIT(14), REALTEK_SR_CLKMANAGE);
++		dev_warn(&pdev->dev, "PCIe link is down after 3 attempts - skipping bus (no device)\n");
+ 		return 0;
+ 	}
+ 
 diff --git a/drivers/net/ethernet/rtl819x/rtl819x-eth.c b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
-index 1035361..659d4ed 100644
+index 1035361..966cda0 100644
 --- a/drivers/net/ethernet/rtl819x/rtl819x-eth.c
 +++ b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
-@@ -440,6 +440,14 @@ static int trunk_pause = 2;
+@@ -440,6 +440,16 @@ static int trunk_pause = 2;
  module_param(trunk_pause, int, 0644);
  MODULE_PARM_DESC(trunk_pause, "RGMII-trunk 802.3x pause: 2=force OFF (default, A-2 residual fix), 1=force on (bench A/B collapse), 0=leave loader value");
  
@@ -46,12 +210,14 @@ index 1035361..659d4ed 100644
 +
 +static int p0_tx_delay = -1;
 +module_param(p0_tx_delay, int, 0644);
++static int dp_heartbeat;
++module_param(dp_heartbeat, int, 0644);
 +MODULE_PARM_DESC(p0_tx_delay, "Port0 RGMII TX delay (0..1; -1=auto: 1)");
 +
  /* 8367S half of the trunk-pause fix (rtl8367b.c; CONFIG_RTL8367B_PHY=y, so
   * this built-in <-> built-in reference links into vmlinux). */
  extern int rtl8367s_trunk_pause_set(int on);
-@@ -478,7 +486,8 @@ static void rtl865x_start(void)
+@@ -478,7 +488,8 @@ static void rtl865x_start(void)
  	 * fabric snapshot at the end of this function so a fabric_reset
  	 * restores the corrected value rather than the loader's.
  	 */
@@ -61,7 +227,7 @@ index 1035361..659d4ed 100644
  
  	/* Enable Tx/Rx, 128-word Lexra bus burst, 2048-byte mbufs. */
  	REG32(CPUICR) = TXCMD | RXCMD | BUSBURST_128WORDS | MBUF_2048BYTES;
-@@ -544,8 +553,13 @@ static void rtl865x_start(void)
+@@ -544,8 +555,13 @@ static void rtl865x_start(void)
  			REG32(PBFCR0 + q * 0x04) = (0x003Cu << 16) | 0x005Au;
  	}
  
@@ -76,7 +242,7 @@ index 1035361..659d4ed 100644
  
  	/*
  	 * M6.6 KNOWN-OPEN (A-2): sustained max-rate ROUTED bulk (~700 Mbit/s iperf3
-@@ -680,35 +694,42 @@ static void rtl865x_start(void)
+@@ -680,35 +696,42 @@ static void rtl865x_start(void)
  		 * in exactly this test, which is why every step below is loader-exact. */
  		{
  			u32 v;
@@ -137,7 +303,7 @@ index 1035361..659d4ed 100644
  			v |= (3u << 25) | (3u << 18);	/* CFG_CPUC_TAG|CFG_TX_CPUC_TAG, CF_SEL_RGTXC */
  			REG32(RTL819X_SWCORE_BASE + 0x414C) = v;
  			/* 5. PITCR port0 = RGMII (default UTP!) */
-@@ -786,11 +807,13 @@ static void rtl865x_start(void)
+@@ -786,11 +809,13 @@ static void rtl865x_start(void)
  			if (rtl8367s_trunk_pause_set(trunk_pause == 1) < 0)
  				pr_err("rtl819x trunk-pause: 8367S SMI not probed — SoC side only (re-apply: eth0 down/up)\n");
  		}
@@ -153,7 +319,7 @@ index 1035361..659d4ed 100644
  
  		REG32(MSCR) |= MSCR_EN_L2;		/* global L2 forwarding enable (LAST) */
  	}
-@@ -798,9 +821,11 @@ static void rtl865x_start(void)
+@@ -798,9 +823,11 @@ static void rtl865x_start(void)
  	/* Bring-up self-diagnosis (readable over ssh via `dmesg`): on a dead-RX
  	 * boot the ring base still latches into CPURPDCR0 but CPUIISR never accrues
  	 * RX_DONE — that distinguishes an engine wedge from a fabric-silent path. */
@@ -168,16 +334,16 @@ index 1035361..659d4ed 100644
  
  	/* M7: latch the known-good fabric config ONCE, at the end of the first
  	 * successful bring-up (loader groundwork + this function's programming,
-@@ -826,7 +851,7 @@ static irqreturn_t rtl819x_eth_isr(int irq, void *dev_id)
+@@ -826,7 +853,7 @@ static irqreturn_t rtl819x_eth_isr(int irq, void *dev_id)
  	u32 status;
  
  	status = readl(priv->base + R_CPUIISR);
 -	{ static u32 isr_n; if (!(isr_n++ & 0x7ff)) pr_info("rtl819x isr#%u st=%08x\n", isr_n, status); }
-+	{ static u32 isr_n; if (!(isr_n++ & 0x7ff)) pr_info_ratelimited("rtl819x isr#%u st=%08x\n", isr_n, status); }
++	{ static u32 isr_n; if (isr_n++ == 0 || (dp_heartbeat && !(isr_n & 0x7ff))) pr_info_ratelimited("rtl819x isr#%u st=%08x\n", isr_n, status); }
  
  	/*
  	 * Mask at BOTH the CPU-iface (CPUIIMR) AND the global controller
-@@ -1273,7 +1298,10 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1273,7 +1300,10 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  				skb = skb_vlan_untag(skb);	/* -> hwaccel tag = real vid */
  				if (!skb) { dev->stats.rx_dropped++; continue; }
  			} else {
@@ -189,7 +355,7 @@ index 1035361..659d4ed 100644
  			}
  		}
  		napi_gro_receive(napi, skb);
-@@ -1284,11 +1312,17 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1284,11 +1314,17 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  	}
  
  	/* M6.3: NAPI complete -> re-arm the switch NIC IRQ the ISR masked (CPUIIMR
@@ -209,7 +375,16 @@ index 1035361..659d4ed 100644
  		REG32(GIMR) |= BSP_SW_IE;
  		set_c0_status(STATUSF_IP4);
  		/*
-@@ -1364,19 +1398,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1338,7 +1374,7 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+ 			pr_err_ratelimited("rtl819x DP: PRESSURE poll#%lu rx_done=%d rx_pkts=%lu CPUIISR=%08x USEDDSC=%u runout=%d\n",
+ 					   pc, rx_done, dev->stats.rx_packets,
+ 					   REG32(CPUIISR), used, runout);
+-		else if (beat)
++		else if (beat && (dp_heartbeat || pc == 1024))
+ 			pr_err("rtl819x DP: poll#%lu rx_done=%d rx_pkts=%lu CPUIISR=%08x USEDDSC=%u runout=%d\n",
+ 			       pc, rx_done, dev->stats.rx_packets, REG32(CPUIISR),
+ 			       used, runout);
+@@ -1364,19 +1400,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  
  	memset(&nicTx, 0, sizeof(nicTx));
  	nicTx.txIdx = 0;
@@ -229,7 +404,7 @@ index 1035361..659d4ed 100644
  	/*
  	 * VID from the netdev's hwaccel VLAN tag — eth0.2 (LAN) -> VID 2,
  	 * eth0.1 (WAN) -> VID 1 (the M6.6 Fork A VLAN plan); an untagged frame
-@@ -1395,6 +1416,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1395,6 +1418,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  		nicTx.vid = skb_vlan_tag_get(skb) & 0xfff;
  	else
  		nicTx.vid = 2;
@@ -241,7 +416,7 @@ index 1035361..659d4ed 100644
  	nicTx.flags = 0;	/* direct-TX: swnic adds PKTHDR_USED_8197F|PKT_OUTGOING */
  
  	if (New_swNic_send(skb, (void *)(uintptr_t)dma, len, &nicTx) != 0) {
-@@ -1554,6 +1580,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
+@@ -1554,6 +1582,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
  	else
  		eth_hw_addr_random(dev);
  

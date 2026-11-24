@@ -222,7 +222,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtw88','rtl8822be')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.0-m3-dualband-wifi-luci-ramboot\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.1-m3-wifi-pcie-hardened-ramboot\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
     boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net')
     check('rsd0614-wired-network-config',
           b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
@@ -235,15 +235,31 @@ def audit(image):
           b'swconfig dev switch0 set apply 1' in netinit['data'])
     wifimod=byname.get('lib/modules/4.14.187/rtl8192cd.ko');wifiauto=byname.get('etc/modules.d/60-rtl8192cd-rsd0614',{}).get('data',b'')
     wifish=byname.get('lib/netifd/wireless/rtl8192cd.sh')
+    luci_wjs=byname.get('www/luci-static/resources/view/network/wireless.js',{}).get('data',b'')
     has_iwpriv=('usr/sbin/iwpriv' in byname) or ('sbin/iwpriv' in byname)
     check('rsd0614-m3-dualband-wifi-and-luci',
           wifimod is not None and len(wifimod['data'])>65536 and
           b'rtl8192cd' in wifiauto and
           wifish is not None and stat.S_ISREG(wifish['mode']) and (wifish['mode']&0o777)==0o755 and
           b'init_wireless_driver' in wifish['data'] and b'add_driver rtl8192cd' in wifish['data'] and
-          b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and b'led_type' not in wifish['data'] and
+          b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and
+          b'HT40+|VHT40+) echo 2' in wifish['data'] and
+          b'encmode=6' not in wifish['data'] and b'led_type' not in wifish['data'] and
+          b'rtl8192cd' in luci_wjs and
           b'RSD0614-OpenWrt-5G' in ucinet and b'RSD0614-OpenWrt-2G' in ucinet and
           'usr/sbin/uhttpd' in byname and 'www/cgi-bin/luci' in byname and has_iwpriv)
+    ko_ok=False;ko_detail='missing rtl8192cd.ko'
+    if wifimod is not None:
+        try:
+            from export_build_evidence import parse_elf32_le_kmod_info
+            ko_info=parse_elf32_le_kmod_info(wifimod['data'])
+            kblob=payload[:cpiooff]
+            missing_kstr=[s for s in ko_info['undef_symbols'] if (b'\x00'+s.encode('ascii')+b'\x00') not in kblob]
+            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and ko_info['bss_bytes']<=1536*1024)
+            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
+        except (OSError,ValueError,struct.error) as e:
+            ko_ok=False;ko_detail=str(e)
+    check('rtl8192cd-elf-ksymtab-and-bss-guard',ko_ok,ko_detail)
     check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     survey=byname.get('usr/sbin/rsd0614-survey')
     check('omnibus-survey-tool-executable',survey is not None and stat.S_ISREG(survey['mode']) and (survey['mode']&0o777)==0o755 and survey['data'].startswith(b'#!/bin/sh\n') and b'/proc/rsd0614_hw_survey' in survey['data'] and b'/dev/mtdblock' not in survey['data'])

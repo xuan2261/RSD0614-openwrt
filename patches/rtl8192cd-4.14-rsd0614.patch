@@ -1,5 +1,41 @@
+diff --git a/8192cd_cfg.h b/8192cd_cfg.h
+index 29968c4..1dc4221 100755
+--- a/8192cd_cfg.h
++++ b/8192cd_cfg.h
+@@ -4485,6 +4485,31 @@
+ 
+ #endif /* #if defined(CONFIG_RTL8672) && defined(RX_BUFFER_GATHER) && !defined(__OSK__)*/
+ 
++#if defined(CONFIG_RTL_SHRINK_MEMORY_SIZE) && defined(CONFIG_RTL_8197F) && defined(CONFIG_RTL8192CD_LINUX6_BUS)
++/* Rock Space RSD0614 V1.0 (64 MiB DDR2 + initramfs):
++ * Bound per-radio TX/RX descriptor rings and RX SKB lengths so coherent DMA
++ * stays well below order-7 and RX buffers fit single 4 KiB pages (with
++ * RX_BUFFER_GATHER reassembling >2600B AMSDUs). */
++#undef NUM_TX_DESC
++#undef NUM_RX_DESC
++#undef NUM_RX_DESC_2G
++#undef MAX_RX_BUF_LEN
++#undef MIN_RX_BUF_LEN
++#undef MAX_RX_BUF_LEN_1
++#undef MIN_RX_BUF_LEN_1
++#undef MAX_SKB_NUM
++#undef MAX_SKB_NUM_1
++#define NUM_TX_DESC         256
++#define NUM_RX_DESC         256
++#define NUM_RX_DESC_2G      256
++#define MAX_RX_BUF_LEN      2600
++#define MIN_RX_BUF_LEN      2600
++#define MAX_RX_BUF_LEN_1    2600
++#define MIN_RX_BUF_LEN_1    2600
++#define MAX_SKB_NUM         NUM_RX_DESC
++#define MAX_SKB_NUM_1       NUM_RX_DESC_2G
++#endif
++
+ //-------------------------------------------------------------
+ // NFJROM CONFIG
+ //-------------------------------------------------------------
 diff --git a/8192cd_comapi.c b/8192cd_comapi.c
-index cce51db..317cdac 100755
+index cce51db..24dcf3e 100755
 --- a/8192cd_comapi.c
 +++ b/8192cd_comapi.c
 @@ -512,10 +512,10 @@ int rtl_wx_get_sens(struct net_device *dev,
@@ -44,7 +80,27 @@ index cce51db..317cdac 100755
  
  err_close:
  	filp_close(fp, NULL);
-@@ -3748,6 +3743,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3713,8 +3708,9 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ 		return -1;
+ 	}
+ 	
+-	if((mibstr = (unsigned char *)kmalloc(20, GFP_ATOMIC)) == NULL) {
++	if((mibstr = (unsigned char *)kmalloc(MAX_PARAM_BUF_SIZE, GFP_ATOMIC)) == NULL) {
+ 		printk("%s(%d): not enough memory\n", __FUNCTION__, __LINE__);
++		kfree(cmd_buf);
+ 		return -1;
+ 	}
+ 	
+@@ -3731,7 +3727,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ 		//int i=0;
+ 		
+ 		memset(cmd_buf, 0, MAX_PARAM_BUF_SIZE);
+-		memset(mibstr, 0, 20);
++		memset(mibstr, 0, MAX_PARAM_BUF_SIZE);
+ 		memset(valstr, 0, MAX_PARAM_BUF_SIZE);
+ 		
+ 		line_head = next_head;
+@@ -3748,6 +3744,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  #ifdef VENDOR_PARAM_COMPATIBLE	
  		/* To compatible with other vendor's parameters, each parameter must have its own process function - chris*/
  		loc = strchr(mibstart, '=');
@@ -53,7 +109,7 @@ index cce51db..317cdac 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - miblen -1;
  		if (vallen>0) {			
-@@ -3770,6 +3767,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3770,6 +3768,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			continue;
  		
  		loc = strchr(mibstart, '=');
@@ -62,6 +118,19 @@ index cce51db..317cdac 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - (strlen(dev->name)+1) - (miblen+1);
  		
+@@ -3777,8 +3777,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ 			
+ 			ret = set_mib(priv, mibstart);
+ 			if (ret < 0) {
++				if (miblen >= MAX_PARAM_BUF_SIZE) miblen = MAX_PARAM_BUF_SIZE - 1;
++				if (vallen >= MAX_PARAM_BUF_SIZE) vallen = MAX_PARAM_BUF_SIZE - 1;
+ 				strncpy(mibstr, mibstart, miblen);
++				mibstr[miblen] = '\0';
+ 				strncpy(valstr, (char*)((u32)loc+1), vallen);
++				valstr[vallen] = '\0';
+ 				//printk("(%s) = (%s) (%d)\n", mibstr, valstr, vallen);
+ 				printk("CFGFILE set_mib \"%s\" failed \n", mibstart);
+ 				//return -1;
 diff --git a/8192cd_host.c b/8192cd_host.c
 index 4790ff5..7165275 100755
 --- a/8192cd_host.c
@@ -113,10 +182,34 @@ index 9768da7..f77d4c6 100755
  	{
  		priv->pshare->wlangeneral_pid= -1;
 diff --git a/8192cd_osdep.c b/8192cd_osdep.c
-index 90c8937..57b2ea3 100755
+index 90c8937..c99e3f5 100755
 --- a/8192cd_osdep.c
 +++ b/8192cd_osdep.c
-@@ -10916,8 +10916,8 @@ do_hw_init:
+@@ -10169,6 +10169,8 @@ priv->pshare->curr_band =0; //init curr_band value
+     if(GET_CHIP_VER(priv)==VERSION_8197G) {
+         //TODO
+         REG32(0xB8000064)|= 0x1F;
++        (void)REG32(0xB8000064);
++        mdelay(1);
+     }
+ #endif //CONFIG_WLAN_HAL_8197G
+ 
+@@ -10732,6 +10734,14 @@ priv->pshare->curr_band =0; //init curr_band value
+ 				}
+ #ifdef CONFIG_RTL8192CD_LINUX6_BUS
+ 				priv->pshare->linux6_irq_requested = true;
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++				if (GET_CHIP_VER(priv) == VERSION_8197G || GET_CHIP_VER(priv) == VERSION_8197F) {
++					__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
++					__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) | BIT(29),
++						     (void __iomem *)0xB8003000UL);
++					(void)__raw_readl((void __iomem *)0xB8003000UL);
++				}
++#endif
+ #endif
+ 				if (IS_ROOT_INTERFACE(priv))
+ 					rtl8197f_wlan_phase_set(221, "irq-ready", 0);
+@@ -10916,8 +10926,8 @@ do_hw_init:
  
  		if (rc && ++init_hw_cnt < 5) {
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
@@ -127,7 +220,44 @@ index 90c8937..57b2ea3 100755
  				unsigned int gate_retry = REG32(0xB8000064);
  				REG32(0xB8000064) = gate_retry & ~0x1fU;
  				(void)REG32(0xB8000064);
-@@ -13222,8 +13222,17 @@ int rtl8192cd_close(struct net_device *dev)
+@@ -10960,7 +10970,7 @@ do_hw_init:
+ 			}
+ #endif //CONFIG_RTL_92D_SUPPORT
+ 			force_stop_wlan_hw();
+-#if !defined(NOT_RTK_BSP) && !defined(CONFIG_RTL8672)
++#if !defined(NOT_RTK_BSP) && !defined(CONFIG_RTL8672) && !defined(CONFIG_RTL8192CD_LINUX6_BUS)
+ #ifdef CONFIG_RTL_92D_SUPPORT
+ 			if (GET_CHIP_VER(priv)!=VERSION_8192D)	/* do not trigger wtdog if 92D open fail */
+ #endif
+@@ -12119,6 +12129,13 @@ free_res:
+ #ifdef CONFIG_RTL8192CD_LINUX6_BUS
+ 	if (priv && IS_ROOT_INTERFACE(priv) && priv->pshare->linux_dev) {
+ 		if (priv->pshare->linux6_irq_requested) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++			if (GET_CHIP_VER(priv) == VERSION_8197G || GET_CHIP_VER(priv) == VERSION_8197F) {
++				__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) & ~BIT(29),
++					     (void __iomem *)0xB8003000UL);
++				__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
++			}
++#endif
+ 			free_irq(dev->irq, dev);
+ 			priv->pshare->linux6_irq_requested = false;
+ 		}
+@@ -13100,6 +13117,13 @@ int rtl8192cd_close(struct net_device *dev)
+ #endif
+ #ifdef CONFIG_RTL8192CD_LINUX6_BUS
+ 				if (priv->pshare->linux6_irq_requested) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
++					if (GET_CHIP_VER(priv) == VERSION_8197G || GET_CHIP_VER(priv) == VERSION_8197F) {
++						__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) & ~BIT(29),
++							     (void __iomem *)0xB8003000UL);
++						__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
++					}
++#endif
+ 					free_irq(dev->irq, dev);
+ 					priv->pshare->linux6_irq_requested = false;
+ 				}
+@@ -13222,8 +13246,17 @@ int rtl8192cd_close(struct net_device *dev)
  
  #ifdef CONFIG_WLAN_HAL_8197G
  	if (IS_ROOT_INTERFACE(priv) && (GET_CHIP_VER(priv)==VERSION_8197G)) {
@@ -146,7 +276,7 @@ index 90c8937..57b2ea3 100755
  	}
  #endif //CONFIG_WLAN_HAL_8197G
  
-@@ -14496,7 +14505,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
+@@ -14496,7 +14529,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -155,7 +285,7 @@ index 90c8937..57b2ea3 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14524,7 +14533,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
+@@ -14524,7 +14557,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -164,7 +294,7 @@ index 90c8937..57b2ea3 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14546,7 +14555,7 @@ static const struct net_device_ops mesh_netdev_ops = {
+@@ -14546,7 +14579,7 @@ static const struct net_device_ops mesh_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -173,7 +303,17 @@ index 90c8937..57b2ea3 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = mesh_start_xmit,
-@@ -16781,9 +16790,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
+@@ -15470,7 +15503,8 @@ int InitWlanBuffer88XX_V1(struct rtl8192cd_priv *priv)
+ 			  GET_CHIP_VER(priv) == VERSION_8197G) &&
+ 			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_EMBEDDED))) ||
+ 			((GET_CHIP_VER(priv) == VERSION_8822B ||
+-			  GET_CHIP_VER(priv) == VERSION_8812F) &&
++			  GET_CHIP_VER(priv) == VERSION_8812F ||
++			  GET_CHIP_VER(priv) == VERSION_8814B) &&
+ 			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_PCI_DIRECT)));
+ 		_GET_HAL_DATA(priv)->alloc_desc_txbd_addr = NULL;
+ 		_GET_HAL_DATA(priv)->alloc_desc_txbd_buf_size = 0;
+@@ -16781,9 +16815,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
  			priv->pshare->linux6_radio_index = wdev->radio_index;
  			priv->pshare->linux6_root_priv = priv;
  			skb_queue_head_init(&priv->pshare->linux6_rx_delivery);
@@ -185,7 +325,16 @@ index 90c8937..57b2ea3 100755
  			rtl8197f_wlan_phase_set(716, "probe-napi-add-entry", 0);
  			netif_napi_add_weight(dev, &priv->pshare->linux6_rx_napi,
  					rtl8192cd_linux6_napi_poll, 64);
-@@ -18146,6 +18157,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+@@ -17855,6 +17891,8 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+                 priv->pshare->version_id = VERSION_8197G;
+                 DEBUG_INFO("\n found 8197G !!! \n");
+                 REG32(0xB8000064)|= 0x1F;
++                (void)REG32(0xB8000064);
++                mdelay(1);
+                 //TODO
+             }
+ #endif // #if defined(CONFIG_WLAN_HAL_8197F) 
+@@ -18146,6 +18184,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
  	}
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  linux6_irq_ready:
@@ -193,7 +342,7 @@ index 90c8937..57b2ea3 100755
  #endif
  
  #ifdef CONFIG_PUMA_UDMA_SUPPORT
-@@ -20452,7 +20464,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
+@@ -20452,7 +20491,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
          .ndo_stop               = rtl8192cd_close,
          .ndo_set_mac_address    = rtl_pseudo_dev_set_hwaddr,
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -202,7 +351,7 @@ index 90c8937..57b2ea3 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -20530,7 +20542,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
+@@ -20530,7 +20569,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -211,7 +360,7 @@ index 90c8937..57b2ea3 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -22818,7 +22830,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
+@@ -22818,7 +22857,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_vdev_get_stats,
@@ -221,7 +370,7 @@ index 90c8937..57b2ea3 100755
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
 diff --git a/8192cd_rx.c b/8192cd_rx.c
-index f5ac923..bd7ef76 100755
+index f5ac923..cd984e0 100755
 --- a/8192cd_rx.c
 +++ b/8192cd_rx.c
 @@ -4912,6 +4912,8 @@ void rtl8192cd_dsr_rxq(unsigned long data)
@@ -233,8 +382,17 @@ index f5ac923..bd7ef76 100755
  #endif
  }
  
+@@ -5017,7 +5019,7 @@ int rtl8192cd_linux6_napi_poll(struct napi_struct *napi, int budget)
+ 	 * Do not duplicate any reclaim logic here.  Ask the vendor TX DSR to
+ 	 * poll the hardware queue indices after real RX progress; its normal
+ 	 * locking and rtl88XX_tx_recycle() path performs the DMA unmaps. */
+-	if (work_done > 0 && GET_CHIP_VER(priv) == VERSION_8822B &&
++	if (work_done > 0 && (GET_CHIP_VER(priv) == VERSION_8822B || GET_CHIP_VER(priv) == VERSION_8814B) &&
+ 	    pshare->linux6_radio_index == 0 &&
+ 	    !(pshare->linux6_napi_polls & 0x0f) &&
+ 	    rtk_tasklet_set_triggered(&(pshare->tx_tasklet))) {
 diff --git a/Makefile b/Makefile
-index c290316..d8ebecd 100755
+index c290316..8e5bec8 100755
 --- a/Makefile
 +++ b/Makefile
 @@ -7,7 +7,9 @@ MODULE_NAME := rtl8192cd
@@ -247,17 +405,18 @@ index c290316..d8ebecd 100755
  rtl8192cd-objs += linux6/rtl8192cd_core.o \
  	linux6/rtl8192cd_board.o \
  	linux6/rtl8192cd_factory.o \
-@@ -46,6 +48,9 @@ RTL8197F_CPP_CONFIGS := \
+@@ -46,6 +48,10 @@ RTL8197F_CPP_CONFIGS := \
  	CONFIG_OPENWRT_SDK \
  	CONFIG_CFG80211 \
  	CONFIG_RTL8192CD_LINUX6_BUS \
 +	CONFIG_MW5_LEGACY_WEXT \
 +	CONFIG_RTL_COMAPI_WLTOOLS \
 +	CONFIG_RTL_COMAPI_CFGFILE \
++	CONFIG_RTL_SHRINK_MEMORY_SIZE \
  	CONFIG_MW5_ACCEL \
  	CONFIG_MW5_BOARD_QUIRKS \
  	CONFIG_MW5_OEM_WLAN_ORDER \
-@@ -530,6 +535,7 @@ endif
+@@ -530,6 +536,7 @@ endif
  # Linux6 bus selection is therefore also an explicit selector for the private
  # cfg80211 adapter objects.  Without this, RTK_NL80211 callers compile while
  # their implementations are omitted and MODPOST reports unresolved symbols.
@@ -265,7 +424,7 @@ index c290316..d8ebecd 100755
  ifneq ($(filter y m,$(CONFIG_CFG80211) $(CONFIG_RTL8192CD_LINUX6_BUS)),)
  EXTRA_CFLAGS += -DRTK_NL80211
  rtl8192cd-objs += 8192cd_net80211.o 8192cd_psk_hapd.o 8192cd_cfg80211.o
-@@ -540,6 +546,7 @@ ifeq ($(CONFIG_PACP_SUPPORT),y)
+@@ -540,6 +547,7 @@ ifeq ($(CONFIG_PACP_SUPPORT),y)
  rtl8192cd-objs += 8192cd_comapi.o
  endif
  endif
@@ -273,7 +432,7 @@ index c290316..d8ebecd 100755
  
  ifeq ($(CONFIG_RTK_WLAN_MANAGER), y)
  		rtl8192cd-objs += rtw_wlan_manager.o
-@@ -934,7 +941,7 @@ endif
+@@ -934,7 +942,7 @@ endif
  #
  #Build C code for TXT or BIN file
  #
@@ -282,6 +441,86 @@ index c290316..d8ebecd 100755
  
  $(obj)/data_%.c: $(src)/$(RTL_WLAN_DATA_DIR)/%.txt
  	rm -f $(obj)/TXPWR_92C.h
+diff --git a/WlanHAL/RTL88XX/Hal88XXGen.c b/WlanHAL/RTL88XX/Hal88XXGen.c
+index d646f21..13cca98 100755
+--- a/WlanHAL/RTL88XX/Hal88XXGen.c
++++ b/WlanHAL/RTL88XX/Hal88XXGen.c
+@@ -9849,7 +9849,7 @@ InitMACSysyemCfg88XX(
+     #endif
+ 	// TODO: Filen, no need to sync !?
+ 	Adapter->pshare->InterruptMask = _GET_HAL_DATA(Adapter)->IntMask[0];
+-	Adapter->pshare->InterruptMask = _GET_HAL_DATA(Adapter)->IntMask[1];
++	Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];
+ 
+ 
+     return RT_STATUS_SUCCESS;
+diff --git a/WlanHAL/RTL88XX/Hal88XXRxDesc.c b/WlanHAL/RTL88XX/Hal88XXRxDesc.c
+index 9187036..5e4ee26 100755
+--- a/WlanHAL/RTL88XX/Hal88XXRxDesc.c
++++ b/WlanHAL/RTL88XX/Hal88XXRxDesc.c
+@@ -314,10 +314,10 @@ PrepareRXBD88XX_V1(
+ #endif         
+ #if IS_RTL88XX_MAC_V4
+         if(_GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v4){
+-            HAL_RTL_W32(RXBD_Reg_L[q_num], \
+-                    (unsigned long)_GET_HAL_DATA(Adapter)->desc_phy_rxdma_buf & 0xFFFFFFFF);
+-            HAL_RTL_W32(RXBD_Reg_H[q_num], \
+-                    (unsigned long)_GET_HAL_DATA(Adapter)->desc_phy_rxdma_buf >> 32);
++            HAL_RTL_W32(RXBD_Reg_L[q_num],
++                    lower_32_bits((dma_addr_t)_GET_HAL_DATA(Adapter)->desc_phy_rxdma_buf));
++            HAL_RTL_W32(RXBD_Reg_H[q_num],
++                    upper_32_bits((dma_addr_t)_GET_HAL_DATA(Adapter)->desc_phy_rxdma_buf));
+         }
+         else
+ #endif                 
+@@ -510,8 +510,8 @@ PrepareRXBD88XX(
+ 
+ #if IS_RTL88XX_MAC_V4
+             if(_GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v4){
+-                HAL_RTL_W32(RXBD_Reg_L[q_num], tmp_dma_ring_addr & 0xFFFFFFFF);
+-                HAL_RTL_W32(RXBD_Reg_H[q_num], tmp_dma_ring_addr >> 32);
++                HAL_RTL_W32(RXBD_Reg_L[q_num], lower_32_bits((dma_addr_t)tmp_dma_ring_addr));
++                HAL_RTL_W32(RXBD_Reg_H[q_num], upper_32_bits((dma_addr_t)tmp_dma_ring_addr));
+             }
+             else
+ #endif
+diff --git a/WlanHAL/RTL88XX/Hal88XXTxDesc.c b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
+index 565c2c4..14d8468 100755
+--- a/WlanHAL/RTL88XX/Hal88XXTxDesc.c
++++ b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
+@@ -8868,10 +8868,28 @@ original:
+ #endif
+ #if IS_RTL8814B_SERIES
+         if (IS_HARDWARE_TYPE_8814B(Adapter)) {
+-
+-            if(TXBD_Reg_L[q_num]){        
+-            HAL_RTL_W32(TXBD_Reg_L[q_num], (HAL_VIRT_TO_BUS((u4Byte)ptxbd)) & 0xFFFFFFFF);
+-            HAL_RTL_W32(TXBD_Reg_H[q_num], ((HAL_VIRT_TO_BUS((u4Byte)ptxbd)) & 0xFFFFFFFF00000000) >> 32);
++            if (TXBD_Reg_L[q_num]) {
++#if defined(CONFIG_RTL8192CD_LINUX6_BUS) && defined(CONFIG_MW5_FORCE_WLAN_DEVICE_TABLE)
++                dma_addr_t txbd_dma = coherent_tx ? coherent_bd :
++                    (dma_addr_t)HAL_VIRT_TO_BUS((void *)(u4Byte)ptxbd);
++                HAL_RTL_W32(TXBD_Reg_L[q_num], lower_32_bits(txbd_dma));
++                HAL_RTL_W32(TXBD_Reg_H[q_num], upper_32_bits(txbd_dma));
++                if (coherent_tx) {
++                    if (q_num == HCI_TX_DMA_QUEUE_MGT_V1) {
++                        Adapter->pshare->linux6_txbd_dma_base = coherent_bd;
++                        Adapter->pshare->linux6_txbd_hw_base = HAL_RTL_R32(TXBD_Reg_L[q_num]);
++                        Adapter->pshare->linux6_txdesc_dma_base = coherent_desc;
++                    } else if (q_num == DMA_QUEUE_BCN) {
++                        Adapter->pshare->linux6_bcnbd_dma_base = coherent_bd;
++                        Adapter->pshare->linux6_bcnbd_hw_base = HAL_RTL_R32(TXBD_Reg_L[q_num]);
++                        Adapter->pshare->linux6_bcndesc_dma_base = coherent_desc;
++                    }
++                }
++#else
++                dma_addr_t txbd_dma = (dma_addr_t)HAL_VIRT_TO_BUS((u4Byte)ptxbd);
++                HAL_RTL_W32(TXBD_Reg_L[q_num], lower_32_bits(txbd_dma));
++                HAL_RTL_W32(TXBD_Reg_H[q_num], upper_32_bits(txbd_dma));
++#endif
+             }
+         }
+ #endif
 diff --git a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c b/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
 index da6a594..fff2480 100755
 --- a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
@@ -295,8 +534,21 @@ index da6a594..fff2480 100755
  VAR_MAPPING(wfo_rtl8192cd, wfo_rtl8192cd);
 +#endif
  
+diff --git a/core/8192cd_core_tx.c b/core/8192cd_core_tx.c
+index 1c8260c..dd73218 100755
+--- a/core/8192cd_core_tx.c
++++ b/core/8192cd_core_tx.c
+@@ -16891,7 +16891,7 @@ int rtl8192cd_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ 	x = 0;
+ #endif
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,140) || LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0))
++#if ((LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,140) && LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)) || LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0))
+ 	/*Allow wifi driver to adjust default default skb_pacing_shift.
+ 	 *Kernel 4.4 TCP allows roughly 1ms worth of queue. If drivers hold skb for too long,
+ 	 *local TCP TP will be severly impacted.*/
 diff --git a/linux6/rtl8192cd_board.c b/linux6/rtl8192cd_board.c
-index 13e8ac0..8dd4338 100755
+index 13e8ac0..91b90c9 100755
 --- a/linux6/rtl8192cd_board.c
 +++ b/linux6/rtl8192cd_board.c
 @@ -2,9 +2,16 @@
@@ -325,15 +577,15 @@ index 13e8ac0..8dd4338 100755
  	struct nvmem_cell *cell;
  	void *buf;
  	size_t len;
-@@ -41,7 +49,48 @@ static int rtl8192cd_linux6_read_cell(struct device *dev, const char *name,
+@@ -41,8 +49,49 @@ static int rtl8192cd_linux6_read_cell(struct device *dev, const char *name,
  	*data = buf;
  	*data_len = len;
  	return 0;
 +#else
 +	return 0;
 +#endif
-+}
-+
+ }
+ 
 +#if !IS_ENABLED(CONFIG_NVMEM) && IS_ENABLED(CONFIG_MTD)
 +static int rtl8192cd_linux414_read_mtd_cfg(struct device *dev,
 +					   void **data, size_t *data_len)
@@ -369,12 +621,35 @@ index 13e8ac0..8dd4338 100755
 +	*data = buf;
 +	*data_len = 0x10000;
 +	return 0;
- }
++}
 +#endif
- 
++
  static int rtl8192cd_hex_nibble(u8 c)
  {
-@@ -110,6 +159,7 @@ static int rtl8192cd_factory_mac(const void *factory, size_t factory_len,
+ 	if (c >= '0' && c <= '9')
+@@ -94,7 +143,20 @@ static int rtl8192cd_factory_mac(const void *factory, size_t factory_len,
+ 	int i;
+ 
+ 	value = rtl8192cd_factory_value(factory, factory_len, key, &len);
+-	if (!value || len != ETH_ALEN * 2)
++	if (!value)
++		return -ENOENT;
++
++	if (len == 17) {
++		char ascii_mac[18];
++
++		memcpy(ascii_mac, value, 17);
++		ascii_mac[17] = '\0';
++		if (!mac_pton(ascii_mac, addr))
++			return -EINVAL;
++		return is_valid_ether_addr(addr) ? 0 : -EINVAL;
++	}
++
++	if (len != ETH_ALEN * 2)
+ 		return -ENOENT;
+ 
+ 	for (i = 0; i < ETH_ALEN; i++) {
+@@ -110,6 +172,7 @@ static int rtl8192cd_factory_mac(const void *factory, size_t factory_len,
  
  static int rtl8192cd_linux6_read_mac_cell(struct device *dev, u8 *addr)
  {
@@ -382,7 +657,7 @@ index 13e8ac0..8dd4338 100755
  	struct nvmem_cell *cell;
  	void *buf;
  	size_t len;
-@@ -140,6 +190,9 @@ static int rtl8192cd_linux6_read_mac_cell(struct device *dev, u8 *addr)
+@@ -140,6 +203,9 @@ static int rtl8192cd_linux6_read_mac_cell(struct device *dev, u8 *addr)
  
  	kfree(buf);
  	return ret;
@@ -392,7 +667,7 @@ index 13e8ac0..8dd4338 100755
  }
  
  int rtl8192cd_linux6_parse_board_data(struct device *dev,
-@@ -182,7 +235,17 @@ int rtl8192cd_linux6_parse_board_data(struct device *dev,
+@@ -182,7 +248,17 @@ int rtl8192cd_linux6_parse_board_data(struct device *dev,
  					&board->factory, &board->factory_len);
  	if (ret)
  		return ret;
@@ -411,6 +686,25 @@ index 13e8ac0..8dd4338 100755
  		ret = device_property_read_string(dev, "realtek,factory-format", &format);
  		if (ret)
  			return dev_err_probe(dev, ret, "factory requires an explicit format\n");
+@@ -211,11 +287,14 @@ int rtl8192cd_linux6_parse_board_data(struct device *dev,
+ 	if (!ret) {
+ 		if (mac_inc)
+ 			eth_addr_add(board->mac_addr, mac_inc);
+-		if (!is_valid_ether_addr(board->mac_addr))
+-			return dev_err_probe(dev, -EINVAL, "invalid derived WLAN MAC address\n");
+-		board->mac_valid = true;
++		if (!is_valid_ether_addr(board->mac_addr)) {
++			dev_warn(dev, "ignoring invalid derived WLAN MAC address; keeping fallback\n");
++			memset(board->mac_addr, 0, sizeof(board->mac_addr));
++		} else {
++			board->mac_valid = true;
++		}
+ 	} else if (ret != -ENOENT && ret != -ENODEV && ret != -ENODATA) {
+-		return dev_err_probe(dev, ret, "failed to obtain WLAN MAC address\n");
++		dev_warn(dev, "ignoring unreadable factory WLAN MAC address (err=%d); keeping fallback\n", ret);
+ 	}
+ 
+ 	/* Optional generic cell: a complete logical vendor eFuse shadow map.  It
 diff --git a/linux6/rtl8192cd_core.c b/linux6/rtl8192cd_core.c
 index eb1ed05..71cd6fb 100755
 --- a/linux6/rtl8192cd_core.c
@@ -429,7 +723,7 @@ index eb1ed05..71cd6fb 100755
  					  &hw->board.radio_index);
  			debugfs_create_u8("rfe_type", 0444, hw->debugfs_dir,
 diff --git a/linux6/rtl8197f_soc.c b/linux6/rtl8197f_soc.c
-index a3d5caa..104daa2 100755
+index a3d5caa..65511ae 100755
 --- a/linux6/rtl8197f_soc.c
 +++ b/linux6/rtl8197f_soc.c
 @@ -1,7 +1,9 @@
@@ -455,16 +749,17 @@ index a3d5caa..104daa2 100755
  	if (IS_ERR(hw->mmio))
  		return PTR_ERR(hw->mmio);
  	hw->mmio_len = resource_size(res);
-@@ -45,20 +52,46 @@ static int rtl8197f_soc_probe(struct platform_device *pdev)
+@@ -45,20 +52,47 @@ static int rtl8197f_soc_probe(struct platform_device *pdev)
  	if (ret)
  		return ret;
  
 +#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-+	/* On Linux 4.14 arch/mips/realtek/irq.c, WMAC (BIT(29)->IP6) stays masked
-+	 * at boot until the SoC WMAC driver binds; clear stale pending and unmask. */
-+	__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
-+	__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) | BIT(29),
++	/* On Linux 4.14 arch/mips/realtek/irq.c, keep WMAC GIMR BIT(29) masked and
++	 * clear stale GISR BIT(29) during probe; rtl8192cd_open unmasks BIT(29)
++	 * only after request_irq() installs the handler. */
++	__raw_writel(__raw_readl((void __iomem *)0xB8003000UL) & ~BIT(29),
 +		     (void __iomem *)0xB8003000UL);
++	__raw_writel(BIT(29), (void __iomem *)0xB8003004UL);
 +#endif
  	platform_set_drvdata(pdev, hw);
  	ret = rtl8192cd_linux6_attach(hw);
@@ -503,7 +798,7 @@ index a3d5caa..104daa2 100755
  
  static const struct of_device_id rtl8197f_soc_of_match[] = {
  	{ .compatible = "realtek,rtl8197g-wlan" },
-@@ -72,7 +105,11 @@ MODULE_DEVICE_TABLE(of, rtl8197f_soc_of_match);
+@@ -72,7 +106,11 @@ MODULE_DEVICE_TABLE(of, rtl8197f_soc_of_match);
  
  static struct platform_driver rtl8197f_soc_driver = {
  	.probe = rtl8197f_soc_probe,

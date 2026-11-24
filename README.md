@@ -21,16 +21,16 @@ The project has already verified on a physical RSD0614 unit:
 - **v5.5.0 & v5.5.1 (`v5.5.1-vg-newdesc-ramboot`, CI run `#45379106697`) M2 wired Gigabit hardware-verified 100% on physical RSD0614 V1.0**:
   - `PCIe0` (`10ec:b814` `RTL8814BR`, 40 MHz, BAR0/BAR2 assigned), `RTL8367S` (`1000M/FD`, `VLAN 1: 4 6t`, `VLAN 2: 0 1 2 3 6t`), and `RTL8197FH-VG` native 6-dword new-descriptor `eth0` (`newdesc=1`, `CPUICR1=0x001861d3`, `rx_pkts=107`, `runout=0`, `CPUIISR=00000000`, `FCS wedge detector armed`);
   - `ping 192.168.1.1` (`4/4` replies, `1 ms`, `0%` loss) and Dropbear `ssh root@192.168.1.1` reached cleanly with zero kernel oops or errors;
-- the consolidated **v5.6.0 (`v5.6.0-m3-dualband-wifi-luci-ramboot`) M3 candidate** builds on top of the verified M2 wired Gigabit stack to deliver in a single RAM-boot image (`NOT YET VERIFIED` on hardware):
-  - **Dual-band Wi-Fi** via out-of-tree pinned Realtek SDK v3.6.0 `kmod-rtl8192cd-rsd0614` (`wlan0`: PCIe0 `RTL8814BR` 5 GHz 4x4 `VHT80` ch 36; `wlan1`: on-SoC `RTL8197G` `HAL 0x15` 2.4 GHz 2x2 `HT20` ch 6, WMAC `GIMR BIT(29)` armed on probe; WEXT + in-kernel WPA2-PSK; runtime read-only `/dev/mtd1` `"cfg"` calibration/MAC loader; atomic dual-band `netifd` handler);
-  - **OpenWrt 19.07 LuCI Web GUI** (`http://192.168.1.1` via `uhttpd` + pinned Lua-era `luci`/`packages` feeds) plus `wireless-tools`, `ethtool`, `iperf3`, and `rsd0614-survey wifi`;
+- the hardened **v5.6.1 (`v5.6.1-m3-wifi-pcie-hardened-ramboot`) M3 candidate** builds on top of the verified M2 wired Gigabit stack and `v5.6.0` physical boot telemetry (`NOT YET VERIFIED` on hardware):
+  - **Dual-band Wi-Fi** via out-of-tree pinned Realtek SDK v3.6.0 `kmod-rtl8192cd-rsd0614` (`wlan0`: PCIe0 `RTL8814BR` 5 GHz 4x4 `VHT80` ch 36; `wlan1`: on-SoC `RTL8197G` `HAL 0x15` 2.4 GHz 2x2 `HT20` ch 6) hardened with the Linux 4.14.187 `sk_pacing_shift_update` guard + fail-closed ELF32-LE `__ksymtab` audit, 64 MiB DDR2 memory shrink (`CONFIG_RTL_SHRINK_MEMORY_SIZE=y`, 256 TX/RX rings, 2600B RX SKBs), `RTL8814BR` coherent TXBD DMA, post-`request_irq` `GIMR BIT(29)` unmask, colon-MAC/fallback tolerance in the read-only `/dev/mtd1` `"cfg"` loader, synchronized PCIe0 reset + 3-attempt bounded retry (`LTSSM 0x0c454504` fix), silent steady-state `eth0` (`dp_heartbeat=0`), and hardened `/lib/netifd/wireless/rtl8192cd.sh`;
+  - **OpenWrt 19.07 LuCI Web GUI** (`http://192.168.1.1` via `uhttpd` + pinned Lua-era `luci`/`packages` feeds with `wireless.js` `rtl8192cd` WPA2/PSK encryption options) plus `wireless-tools`, `ethtool`, `iperf3`, and `rsd0614-survey wifi`;
   - **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` remains disabled, unverified LED GPIOs remain unclaimed, and persistent flash remains **NO-GO**.
 
 ## Consolidated bring-up roadmap
 
 1. **M1 (`v5.3.9` -> `v5.4.2` — VERIFIED on physical RSD0614 V1.0)**: Clean `ttyS0` console, read-only `BH25Q64` MTDs, Reset button (`gpio1 4`), `RTL8367S` (`smi_pefgh_24_23`), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` `10ec:b814` Link UP.
 2. **M2 (`v5.5.1-vg-newdesc-ramboot` — VERIFIED on physical RSD0614 V1.0)**: Full Gigabit wired RAM-boot router (`RTL8367S` `switch0` + `RTL8197FH-VG` 6-dword NIC + LAN `192.168.1.1` ping/SSH + `PCIe0` `10ec:b814` + Reset button).
-3. **M3 (`v5.6.0-m3-dualband-wifi-luci-ramboot` — current candidate, `NOT YET VERIFIED` on hardware)**: Full dual-band Wi-Fi (`RTL8814BR` 5 GHz + `RTL8197G` 2.4 GHz, read-only runtime `"cfg"` calibration) + LuCI 19.07 web UI + diagnostic/benchmark tools in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
+3. **M3 (`v5.6.1-m3-wifi-pcie-hardened-ramboot` — current candidate, `NOT YET VERIFIED` on hardware)**: Hardened dual-band Wi-Fi (`RTL8814BR` 5 GHz + `RTL8197G` 2.4 GHz, 64 MiB RAM-safe rings, coherent DMA, read-only runtime `"cfg"` calibration) + reliable PCIe0 retry + LuCI 19.07 web UI with `rtl8192cd` WPA2 support + diagnostic/benchmark tools in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
 
 ## Safety contract
 

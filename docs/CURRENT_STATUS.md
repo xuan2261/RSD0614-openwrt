@@ -27,21 +27,26 @@
   - Native `RTL8197FH-VG` 6-dword new-descriptor `eth0` engine booted cleanly (`newdesc=1`, `CPUICR1=0x001861d3`, `rx_pkts=107`, `runout=0`, `CPUIISR=00000000`, `FCS wedge detector armed`, zero errors/oops).
   - Full LAN connectivity verified from Windows PC: `ping 192.168.1.1` = `4/4` replies (`1 ms`, `0%` loss) and `ssh root@192.168.1.1` reached Dropbear cleanly.
 
-## v5.6.0 scope — Consolidated M3 Dual-Band Wi-Fi + LuCI 19.07 + Wired Gigabit RAM-Boot (`v5.6.0-m3-dualband-wifi-luci-ramboot`)
+- **v5.6.0 (`v5.6.0-m3-dualband-wifi-luci-ramboot`) hardware run on physical Rock Space RSD0614 V1.0** (CI run `#45399545588`, `4,179,472` bytes / `0x003FC610`, SHA-256 `931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22`):
+  - **Verified PASS on hardware**: wired Gigabit `eth0` (`newdesc=1`, `rx_pkts=649`, `runout=0`, `CPUIISR=00000000`, `FCS wedge detector armed`), `RTL8367S`, `BH25Q64` 6 read-only MTDs, LuCI/`uhttpd` + `40.9 MiB` free RAM (`MemTotal=59460 kB`, `MemFree=40936 kB`), and `netifd` wireless UCI parsing for `radio0`/`radio1`.
+  - **Two runtime blockers isolated from serial log**:
+    1. `rtl8192cd: Unknown symbol sk_pacing_shift_update (err 0)` prevented `rtl8192cd.ko` from loading (`sk_pacing_shift_update` is absent in Linux 4.14.187; unguarded `>= KERNEL_VERSION(4,4,140)` enabled it while `-Wno-implicit-function-declaration` hid the call).
+    2. `PCIe RC0 link check: LTSSM(0x728)=0x0c454504 clk=40000000Hz link_up=0` intermittently stalled in `S_POLL_CONFIG` (`0x04`) due to unsynchronized `PWRCR`/`PERST#` timing without retry.
 
-Consolidates all remaining RAM-boot router capabilities on top of the 100% hardware-verified `v5.5.1` M2 wired Gigabit stack (`9996-rsd0614-vg-rgmii-and-pcie.patch` untouched):
-- **Dual-band Wi-Fi (`kmod-rtl8192cd-rsd0614`)**: out-of-tree pinned Realtek SDK v3.6.0 driver (`tobyw121/Openwrt_RTL` @ `1529557b0936019462c4b24f98bc8436d359bd3a`) patched cleanly for Linux 4.14.187 / GCC 8.4.0 (`patches/rtl8192cd-4.14-rsd0614.patch`) driving BOTH:
-  - **`wlan0` (5 GHz, 4x4 802.11ac `VHT80` ch 36)**: PCIe0 `RTL8814BR` (`10ec:b814`, IRQ 5, `GIMR BIT(21)`),
-  - **`wlan1` (2.4 GHz, 2x2 802.11n `HT20` ch 6)**: on-SoC `RTL8197G` (`HAL 0x15`, `0x18640000 0x40000`, IRQ 6, `GIMR BIT(29)` armed on WMAC probe and included in `mips_chip_irqs`).
-- **WEXT + in-kernel WPA2-PSK + read-only runtime calibration**: uses `CONFIG_MW5_LEGACY_WEXT=y` + `INCLUDE_WPA_PSK` + `/etc/Wireless/RTL8192CD.dat -> /tmp/Wireless` (no `cfg80211`/`wpad`/`hostapd` overhead), runtime read-only `get_mtd_device_nm("cfg")` + `mtd_read()` `tenda-kv` RF calibration/MAC loading with safe eFuse fallback, and an atomic `lock`-protected dual-band `netifd` handler (`/lib/netifd/wireless/rtl8192cd.sh`, zero LED GPIO claims).
-- **OpenWrt 19.07 LuCI Web GUI (`http://192.168.1.1`)**: pinned EOL Lua-era `openwrt/luci` (`f25285a6c26e8776f153994704710cb8e51fad91`) and `openwrt/packages` (`6df6880800397ab3821572c6c5ad18e300374d9e`) feeds (`uhttpd`, `uhttpd-mod-ubus`, `luci`, `luci-base`, `luci-mod-admin-full`, `luci-theme-bootstrap`, `luci-app-firewall`, `luci-proto-ppp`, `cgi-io`).
-- **On-device diagnostics & benchmarking**: `wireless-tools` (`iwpriv`, `iwconfig`, `iwlist`), `ethtool`, `iperf3`, and read-only `rsd0614-survey wifi`.
+## v5.6.1 scope — Hardened M3 Dual-Band Wi-Fi + PCIe0 + LuCI 19.07 + Wired Gigabit RAM-Boot (`v5.6.1-m3-wifi-pcie-hardened-ramboot`)
+
+Consolidates all fixes for the `v5.6.0` boot log findings AND every latent runtime defect caught by full-stack audit into one hardened RAM-boot build:
+- **Driver symbol & fail-closed ELF audit (`patches/rtl8192cd-4.14-rsd0614.patch`, `export_build_evidence.py`, `deep_audit.py`)**: guards `sk_pacing_shift_update` to `4.4.140..4.4.x` / `>= 4.16.0` (0 unresolved symbols vs `vmlinux` `__ksymtab_*`) and enforces pure-Python ELF32-LE MIPS `SHN_UNDEF` vs `System.map` `__ksymtab_*` + `.modinfo` GPL + `.bss <= 1.5 MiB` checks on every build.
+- **64 MiB RAM safety (`CONFIG_RTL_SHRINK_MEMORY_SIZE=y`)**: bounds `NUM_TX_DESC=256`, `NUM_RX_DESC=256`, `NUM_RX_DESC_2G=256`, `MAX_RX_BUF_LEN=2600`, `NUM_STAT=16`, `RTL8192CD_NUM_VWLAN=1` so coherent DMA stays below order-7 and RX SKBs fit single 4 KiB pages (eliminating the order-10 `GFP_ATOMIC` / ~55.6 MiB OOM failure).
+- **Dual-radio DMA, IRQ & calibration hardening**: enables coherent TXBD/TXDESC/beacon DMA for `RTL8814BR` (`VERSION_8814B`) + fixes MIPS32 `>> 32` UB (`lower_32_bits`/`upper_32_bits`), fixes `Hal88XXGen.c` `InterruptMaskExt` typo, moves `RTL8197G` `GIMR BIT(29)` unmask from probe to post-`request_irq()` in `rtl8192cd_open()` (with mask before `free_irq()`), adds `0xB8000064` readback fence + `mdelay(1)`, supports colon-formatted factory MACs with non-fatal fallback in `rtl8192cd_board.c`, includes `VERSION_8814B` in NAPI TX reclaim, guards the watchdog reset trap, and eliminates the 20-byte `mibstr` overflow in `8192cd_comapi.c`.
+- **PCIe0 link reliability & quiet console (`patches/9996-rsd0614-vg-rgmii-and-pcie.patch`)**: synchronizes `PWRCR=0x01` + `PERST#=0` (`290 ms`) -> `PWRCR=0x81` (`10 ms`) -> `PERST#=1` with readback fences and a 3-attempt bounded retry loop (gating off `CLKMANAGE BIT(14)` if all 3 attempts fail); silences steady-state `rtl819x DP: poll#` / `isr#` UART spam via `dp_heartbeat=0` while preserving boot bring-up and unconditional `PRESSURE` warnings.
+- **Userspace & LuCI 19.07 Wi-Fi fixes**: corrects `rtl8192cd.sh` `2ndchoffset` (`HT40+=2`, `HT40-=1`), fixes `psk-mixed` `encmode=4` (never `6`) + cipher parsing + explicit MIB defaults + `lock`-scoped `/etc/Wireless` + empty/duplicate VIF guards, expands `rsd0614-survey wifi` with PCI/LuCI/sanitized config inspection, and patches LuCI `wireless.js` with `rtl8192cd` WPA2/PSK encryption options.
 - **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` stays disabled, unverified LED GPIOs stay unclaimed, and persistent flash remains **NO-GO**.
 
 ## Verification boundary
 
-- v5.3.9..v5.5.1 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), `RTL8197FH-VG` 6-dword `eth0` wired Gigabit (`ping 192.168.1.1` 1ms 0% loss, Dropbear SSH), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` (`10ec:b814` BAR0/BAR2 assigned) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.0 CI OpenWrt compile & `deep_audit.py` (`30/30`): **PASS** (GitHub Actions run `#45399545588`, `6m34s` warm cache, `4,179,472` bytes / `0x003FC610`, `decoded_size=14,394,009` bytes / `13.73 MiB`, SHA-256 `931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22`).
-- v5.6.0 dual-band Wi-Fi (`wlan0` 5 GHz + `wlan1` 2.4 GHz) & LuCI web GUI on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.0**.
+- v5.3.9..v5.6.0 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), `RTL8197FH-VG` 6-dword `eth0` wired Gigabit (`ping 192.168.1.1` 1ms 0% loss, Dropbear SSH, `rx_pkts=649`, `runout=0`), `RTL8197G` WMAC (`HAL 0x15`), `PCIe0` (`10ec:b814`), and LuCI/`uhttpd` + 40.9 MiB free RAM on physical RSD0614 V1.0: **PASS (VERIFIED)**.
+- v5.6.1 CI OpenWrt compile, ELF `__ksymtab` symbol check & `deep_audit.py`: **PENDING CI RUN**.
+- v5.6.1 dual-band Wi-Fi (`wlan0` 5 GHz + `wlan1` 2.4 GHz), hardened PCIe0 retry, and LuCI Wi-Fi config on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.1**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

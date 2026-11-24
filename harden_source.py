@@ -207,77 +207,111 @@ EOF
 }
 
 print_wifi() {
-\techo "=== WIFI_MODULE ==="
-\tgrep -E '^rtl8192cd ' /proc/modules 2>/dev/null || echo "rtl8192cd=not_loaded"
-\techo "=== WIFI_NETDEVS ==="
-\tfor d in /sys/class/net/wlan*; do
-\t\t[ -d "$d" ] || continue
-\t\tb="${d##*/}"
-\t\taddr="$(cat "$d/address" 2>/dev/null || echo unknown)"
-\t\toper="$(cat "$d/operstate" 2>/dev/null || echo unknown)"
-\t\tprintf "%s state=%s mac=%s\\n" "$b" "$oper" "$addr"
-\tdone
-\tif command -v iwconfig >/dev/null 2>&1; then
-\t\techo "=== IWCONFIG ==="
-\t\tiwconfig 2>&1 || true
-\tfi
-\techo "=== WIFI_PROC_SUMMARY ==="
-\tfor d in /proc/wlan0 /proc/wlan1; do
-\t\t[ -d "$d" ] || continue
-\t\techo "--- $d ---"
-\t\tfor f in mib_rf mib_operation sta_info; do
-\t\t\t[ -r "$d/$f" ] || continue
-\t\t\techo "[$f]"
-\t\t\tgrep -Eiv 'passphrase|psk|key|pin|wep|secret' "$d/$f" 2>/dev/null | head -n 40 || true
-\t\tdone
-\tdone
-\tif [ -d /sys/kernel/debug/rtl8192cd ]; then
-\t\techo "=== WIFI_DEBUGFS ==="
-\t\tfor d in /sys/kernel/debug/rtl8192cd/*; do
-\t\t\t[ -d "$d" ] || continue
-\t\t\techo "--- ${d##*/} ---"
-\t\t\tfor f in radio_index rfe_type mac_from_nvmem calibration_len factory_len; do
-\t\t\t\t[ -r "$d/$f" ] && printf "%s=%s\\n" "$f" "$(cat "$d/$f" 2>/dev/null || true)"
-\t\t\tdone
-\t\tdone
-\tfi
-\techo "=== WIFI_INTERRUPTS ==="
-\tgrep -Ei 'wlan|wifi|rtl8192|pcie|wmac' /proc/interrupts 2>/dev/null || true
-\techo "=== WIFI_DMESG ==="
-\tdmesg | grep -Ei 'rtl8192cd|rtl8197|8814|wlan[01]|CfgFile|board-data|tenda-kv|calibrat' | tail -n 60 || true
+	echo "=== WIFI_MODULE ==="
+	grep -E '^rtl8192cd ' /proc/modules 2>/dev/null || echo "rtl8192cd=not_loaded"
+	echo "=== PCI_DEVICES ==="
+	for p in /sys/bus/pci/devices/*; do
+		[ -d "$p" ] || continue
+		bn="${p##*/}"
+		ven="$(cat "$p/vendor" 2>/dev/null || echo ?)"
+		dev="$(cat "$p/device" 2>/dev/null || echo ?)"
+		cls="$(cat "$p/class" 2>/dev/null || echo ?)"
+		irq="$(cat "$p/irq" 2>/dev/null || echo ?)"
+		drv="$(basename "$(readlink "$p/driver" 2>/dev/null)" 2>/dev/null || echo none)"
+		printf "%s vendor=%s device=%s class=%s irq=%s driver=%s\\n" "$bn" "$ven" "$dev" "$cls" "$irq" "$drv"
+	done
+	echo "=== WIFI_NETDEVS ==="
+	for d in /sys/class/net/wlan*; do
+		[ -d "$d" ] || continue
+		b="${d##*/}"
+		addr="$(cat "$d/address" 2>/dev/null || echo unknown)"
+		oper="$(cat "$d/operstate" 2>/dev/null || echo unknown)"
+		printf "%s state=%s mac=%s\\n" "$b" "$oper" "$addr"
+	done
+	echo "=== WIFI_CONFIG_AND_LUCI ==="
+	ls -ld /etc/Wireless /tmp/Wireless 2>/dev/null || true
+	if [ -r /tmp/Wireless/RTL8192CD.dat ]; then
+		echo "--- RTL8192CD.dat (sanitized) ---"
+		grep -Eiv 'passphrase|psk_key|wepkey|key[0-9]=' /tmp/Wireless/RTL8192CD.dat 2>/dev/null || true
+	else
+		echo "RTL8192CD.dat=missing"
+	fi
+	if command -v pgrep >/dev/null 2>&1; then
+		pgrep -a uhttpd 2>/dev/null || echo "uhttpd=not_running"
+	else
+		ps w 2>/dev/null | grep -E '[u]httpd' || echo "uhttpd=not_running"
+	fi
+	if command -v iwconfig >/dev/null 2>&1; then
+		echo "=== IWCONFIG ==="
+		iwconfig 2>&1 || true
+	fi
+	if command -v iwpriv >/dev/null 2>&1; then
+		echo "=== IWPRIV_NONSECRET ==="
+		for iface in wlan0 wlan1; do
+			[ -d "/sys/class/net/$iface" ] || continue
+			for mib in channel band phyBandSelect use40M 2ndchoffset encmode psk_enable; do
+				val="$(iwpriv "$iface" get_mib "$mib" 2>/dev/null | tr '\\n' ' ')"
+				[ -n "$val" ] && printf "%s %s\\n" "$iface" "$val"
+			done
+		done
+	fi
+	echo "=== WIFI_PROC_SUMMARY ==="
+	for d in /proc/wlan0 /proc/wlan1; do
+		[ -d "$d" ] || continue
+		echo "--- $d ---"
+		for f in mib_rf mib_operation sta_info; do
+			[ -r "$d/$f" ] || continue
+			echo "[$f]"
+			grep -Eiv 'passphrase|psk|key|pin|wep|secret' "$d/$f" 2>/dev/null | head -n 40 || true
+		done
+	done
+	if [ -d /sys/kernel/debug/rtl8192cd ]; then
+		echo "=== WIFI_DEBUGFS ==="
+		for d in /sys/kernel/debug/rtl8192cd/*; do
+			[ -d "$d" ] || continue
+			echo "--- ${d##*/} ---"
+			for f in radio_index rfe_type mac_from_nvmem calibration_len factory_len; do
+				[ -r "$d/$f" ] && printf "%s=%s\\n" "$f" "$(cat "$d/$f" 2>/dev/null || true)"
+			done
+		done
+	fi
+	echo "=== WIFI_INTERRUPTS ==="
+	grep -Ei 'wlan|wifi|rtl8192|pcie|wmac' /proc/interrupts 2>/dev/null || true
+	echo "=== WIFI_DMESG ==="
+	dmesg | grep -Ei 'rtl8192cd|rtl8197f[-_](wlan|soc)|rtl8197g|8814|realtek-pci|pcie|wlan[01]|CfgFile|board-data|tenda-kv|calibration|rfe_type' | tail -n 80 || true
 }
 
 cmd="${1:-passive}"
 case "$cmd" in
-\tpassive|all)
-\t\tprint_passive
-\t\t;;
-\tbuttons)
-\t\tshift
-\t\tpoll_buttons "${1:-10}"
-\t\t;;
-\tprobe-smi)
-\t\trun_probe smi
-\t\t;;
-\tprobe-wmac)
-\t\trun_probe wmac
-\t\t;;
-\tprobe-pcie0)
-\t\trun_probe pcie0
-\t\t;;
-\tprobe-all)
-\t\trun_probe smi wmac pcie0
-\t\t;;
-\twifi)
-\t\tprint_wifi
-\t\t;;
-\tbackup-guide)
-\t\tprint_backup_guide
-\t\t;;
-\t*)
-\t\techo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|backup-guide}" >&2
-\t\texit 2
-\t\t;;
+	passive|all)
+		print_passive
+		;;
+	buttons)
+		shift
+		poll_buttons "${1:-10}"
+		;;
+	probe-smi)
+		run_probe smi
+		;;
+	probe-wmac)
+		run_probe wmac
+		;;
+	probe-pcie0)
+		run_probe pcie0
+		;;
+	probe-all)
+		run_probe smi wmac pcie0
+		;;
+	wifi)
+		print_wifi
+		;;
+	backup-guide)
+		print_backup_guide
+		;;
+	*)
+		echo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|backup-guide}" >&2
+		exit 2
+		;;
 esac
 """
 BOARD_02_NETWORK="""#!/bin/sh
@@ -289,13 +323,13 @@ board=$(cat /tmp/sysinfo/board_name 2>/dev/null)
 
 case "$board" in
 rockspace,rsd0614)
-\t# Hardware-verified RTL8367S (cpu_port=6) + SoC CPU-tag VLAN layout:
-\t# eth0.2 = LAN (VID2, ports 0..3), eth0.1 = WAN (VID1, port 4).
-\t# Deterministic locally-administered MACs (LAN != WAN; zero device secrets).
-\tucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
-\tucidef_set_interface_macaddr "lan" "02:06:14:00:00:01"
-\tucidef_set_interface_macaddr "wan" "02:06:14:00:00:02"
-\t;;
+	# Hardware-verified RTL8367S (cpu_port=6) + SoC CPU-tag VLAN layout:
+	# eth0.2 = LAN (VID2, ports 0..3), eth0.1 = WAN (VID1, port 4).
+	# Deterministic locally-administered MACs (LAN != WAN; zero device secrets).
+	ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
+	ucidef_set_interface_macaddr "lan" "02:06:14:00:00:01"
+	ucidef_set_interface_macaddr "wan" "02:06:14:00:00:02"
+	;;
 esac
 
 board_config_flush
@@ -317,223 +351,284 @@ CFGFILE="$CFGDIR/RTL8192CD.dat"
 LOCKFILE="$CFGDIR/.rtl8192cd.lock"
 
 drv_rtl8192cd_init_device_config() {
-\tconfig_add_string path phy hwmode 'macaddr:macaddr'
-\tconfig_add_string country
-\tconfig_add_int band phy_band
-\tconfig_add_int beacon_int dtim_period
-\tconfig_add_boolean noscan
+	config_add_string path phy hwmode 'macaddr:macaddr'
+	config_add_string country
+	config_add_int band phy_band
+	config_add_int beacon_int dtim_period
+	config_add_boolean noscan
 }
 
 drv_rtl8192cd_init_iface_config() {
-\tconfig_add_string ifname
-\tconfig_add_boolean hidden isolate
-\tconfig_add_int maxassoc
+	config_add_string ifname
+	config_add_boolean hidden isolate
+	config_add_int maxassoc
 }
 
 drv_rtl8192cd_cleanup() {
-\treturn 0
+	return 0
 }
 
 rtl_htmode_to_use40m() {
-\tcase "$1" in
-\t\tVHT80*) echo 2 ;;
-\t\tHT40*|VHT40*) echo 1 ;;
-\t\tHT20|VHT20|NONE|"") echo 0 ;;
-\t\t*) echo 0 ;;
-\tesac
+	case "$1" in
+		VHT80*) echo 2 ;;
+		HT40*|VHT40*) echo 1 ;;
+		HT20|VHT20|NONE|"") echo 0 ;;
+		*) echo 0 ;;
+	esac
 }
 
 rtl_htmode_to_offset() {
-\tcase "$1" in
-\t\tHT40+|VHT40+) echo 1 ;;
-\t\tHT40-|VHT40-) echo 2 ;;
-\t\t*) echo 0 ;;
-\tesac
+	# Realtek 2ndchoffset MIB: 0=DONT_CARE, 1=LOWER (HT40-), 2=UPPER (HT40+).
+	case "$1" in
+		HT40+|VHT40+) echo 2 ;;
+		HT40-|VHT40-) echo 1 ;;
+		*) echo 0 ;;
+	esac
 }
 
 rtl_country_to_regdomain() {
-\tcase "$1" in
-\t\t""|US|CA|TW) echo 1 ;;
-\t\tEU|DE|GB|FR|VN|CN|SG|AU) echo 3 ;;
-\t\tJP) echo 6 ;;
-\t\t*[!0-9]*) echo 1 ;;
-\t\t*) echo "$1" ;;
-\tesac
+	case "$1" in
+		""|US|CA|TW) echo 1 ;;
+		EU|DE|GB|FR|VN|CN|SG|AU) echo 3 ;;
+		JP) echo 6 ;;
+		*[!0-9]*) echo 1 ;;
+		*) echo "$1" ;;
+	esac
+}
+
+rtl_cipher_bits() {
+	local cipher="$1" def="$2"
+	case "$cipher" in
+		ccmp|aes) echo 8 ;;
+		tkip) echo 2 ;;
+		tkip+ccmp|ccmp+tkip|tkip+aes|aes+tkip) echo 10 ;;
+		""|auto) echo "$def" ;;
+		*) echo "$def" ;;
+	esac
 }
 
 rtl_emit_encryption() {
-\tlocal p="$1" enc="$2" key="$3"
+	local p="$1" enc="$2" key="$3"
+	local base="${enc%%+*}"
+	local cspec=""
+	local cbits
 
-\tcase "$enc" in
-\t\tnone|"")
-\t\t\techo "${p}_authtype=0"
-\t\t\techo "${p}_encmode=0"
-\t\t\techo "${p}_psk_enable=0"
-\t\t\t;;
-\t\tpsk2*|wpa2*)
-\t\t\techo "${p}_authtype=0"
-\t\t\techo "${p}_encmode=4"
-\t\t\techo "${p}_psk_enable=2"
-\t\t\techo "${p}_wpa2_cipher=8"
-\t\t\techo "${p}_passphrase=\\"$key\\""
-\t\t\t;;
-\t\tpsk-mixed*|wpa-mixed*)
-\t\t\techo "${p}_authtype=0"
-\t\t\techo "${p}_encmode=6"
-\t\t\techo "${p}_psk_enable=3"
-\t\t\techo "${p}_wpa_cipher=10"
-\t\t\techo "${p}_wpa2_cipher=10"
-\t\t\techo "${p}_passphrase=\\"$key\\""
-\t\t\t;;
-\t\tpsk*|wpa*)
-\t\t\techo "${p}_authtype=0"
-\t\t\techo "${p}_encmode=2"
-\t\t\techo "${p}_psk_enable=1"
-\t\t\techo "${p}_wpa_cipher=2"
-\t\t\techo "${p}_passphrase=\\"$key\\""
-\t\t\t;;
-\t\t*)
-\t\t\treturn 1
-\t\t\t;;
-\tesac
-\treturn 0
+	[ "$base" != "$enc" ] && cspec="${enc#*+}"
+
+	case "$base" in
+		none|"")
+			echo "${p}_authtype=0"
+			echo "${p}_encmode=0"
+			echo "${p}_psk_enable=0"
+			echo "${p}_wpa_cipher=0"
+			echo "${p}_wpa2_cipher=0"
+			;;
+		psk2)
+			[ -n "$key" ] || return 1
+			cbits="$(rtl_cipher_bits "$cspec" 8)"
+			echo "${p}_authtype=0"
+			echo "${p}_encmode=4"
+			echo "${p}_psk_enable=2"
+			echo "${p}_wpa_cipher=0"
+			echo "${p}_wpa2_cipher=$cbits"
+			echo "${p}_passphrase=\\"$key\\""
+			;;
+		psk-mixed|psk+psk2)
+			[ -n "$key" ] || return 1
+			cbits="$(rtl_cipher_bits "$cspec" 10)"
+			echo "${p}_authtype=0"
+			echo "${p}_encmode=4"
+			echo "${p}_psk_enable=3"
+			echo "${p}_wpa_cipher=$cbits"
+			echo "${p}_wpa2_cipher=$cbits"
+			echo "${p}_passphrase=\\"$key\\""
+			;;
+		psk)
+			[ -n "$key" ] || return 1
+			cbits="$(rtl_cipher_bits "$cspec" 2)"
+			echo "${p}_authtype=0"
+			echo "${p}_encmode=2"
+			echo "${p}_psk_enable=1"
+			echo "${p}_wpa_cipher=$cbits"
+			echo "${p}_wpa2_cipher=0"
+			echo "${p}_passphrase=\\"$key\\""
+			;;
+		*)
+			return 1
+			;;
+	esac
+	return 0
 }
 
 rtl_merge_fragments() {
-\tlocal tmp="$CFGFILE.tmp.$$"
-\t: > "$tmp"
-\tfor f in "$CFGDIR"/radio_*.dat; do
-\t\t[ -f "$f" ] || continue
-\t\tcat "$f" >> "$tmp"
-\tdone
-\tmv -f "$tmp" "$CFGFILE"
+	local tmp="$CFGFILE.tmp.$$"
+	: > "$tmp"
+	for f in "$CFGDIR"/radio_*.dat; do
+		[ -f "$f" ] || continue
+		cat "$f" >> "$tmp"
+	done
+	mv -f "$tmp" "$CFGFILE"
 }
 
 rtl8192cd_emit_vif() {
-\tlocal name="$1"
-\tlocal mode ssid encryption key hidden isolate maxassoc ifname
+	local name="$1"
+	local mode ssid encryption key hidden isolate maxassoc ifname
+	local existing
 
-\tjson_select config
-\tjson_get_vars mode ssid encryption key hidden isolate maxassoc ifname
-\tjson_select ..
+	json_select config
+	json_get_vars mode ssid encryption key hidden isolate maxassoc ifname
+	json_select ..
 
-\t[ -n "$ifname" ] || ifname="$phy_ifname"
+	[ -n "$ifname" ] || ifname="$phy_ifname"
 
-\t[ "$mode" = "ap" ] || {
-\t\twireless_setup_vif_failed UNSUPPORTED_MODE
-\t\treturn 1
-\t}
+	[ "$mode" = "ap" ] || {
+		wireless_setup_vif_failed UNSUPPORTED_MODE
+		return 1
+	}
 
-\t{
-\t\techo "${ifname}_opmode=16"
-\t\techo "${ifname}_ssid=\\"$ssid\\""
-\t\t[ -n "$hidden" ]   && echo "${ifname}_hiddenAP=$hidden"
-\t\t[ -n "$isolate" ]  && echo "${ifname}_block_relay=$isolate"
-\t\t[ -n "$maxassoc" ] && echo "${ifname}_stanum=$maxassoc"
-\t\trtl_emit_encryption "$ifname" "$encryption" "$key"
-\t} >> "$FRAGFILE" || {
-\t\twireless_setup_vif_failed UNSUPPORTED_ENCRYPTION
-\t\treturn 1
-\t}
+	[ -e "/proc/$ifname/mib_all" ] || {
+		wireless_setup_vif_failed NO_VIF_DEVICE
+		return 1
+	}
 
-\t_rtl_vifs="$_rtl_vifs $name:$ifname"
-\treturn 0
+	for existing in $_rtl_vifs; do
+		if [ "${existing##*:}" = "$ifname" ]; then
+			wireless_setup_vif_failed DUPLICATE_IFNAME
+			return 1
+		fi
+	done
+
+	{
+		echo "${ifname}_opmode=16"
+		echo "${ifname}_ssid=\\"$ssid\\""
+		echo "${ifname}_hiddenAP=${hidden:-0}"
+		echo "${ifname}_block_relay=${isolate:-0}"
+		echo "${ifname}_stanum=${maxassoc:-0}"
+		rtl_emit_encryption "$ifname" "$encryption" "$key"
+	} >> "$FRAGFILE" || {
+		wireless_setup_vif_failed UNSUPPORTED_ENCRYPTION
+		return 1
+	}
+
+	_rtl_vifs="$_rtl_vifs $name:$ifname"
+	return 0
 }
 
 rtl_find_phy() {
-\tlocal want="$1"
-\t[ -n "$want" ] && [ -e "/proc/$want/mib_all" ] && {
-\t\techo "$want"
-\t\treturn 0
-\t}
-\techo "${want:-wlan0}"
+	local want="$1" devname="$2"
+	local fallback="wlan0"
+	case "$devname" in
+		radio[0-9]*) fallback="wlan${devname#radio}" ;;
+	esac
+	[ -n "$want" ] || want="$fallback"
+	[ -e "/proc/$want/mib_all" ] && {
+		echo "$want"
+		return 0
+	}
+	echo "$want"
 }
 
 drv_rtl8192cd_setup() {
-\tlocal phy_ifname _rtl_vifs="" FRAGFILE
-\tlocal channel htmode country hwmode band phy_band phy macaddr
-\tlocal beacon_int dtim_period regdom v
+	local devname="$1"
+	local phy_ifname _rtl_vifs="" FRAGFILE
+	local channel htmode country hwmode band phy_band phy macaddr
+	local beacon_int dtim_period regdom v
 
-\tjson_select config
-\tjson_get_vars channel htmode country hwmode band phy_band phy macaddr beacon_int dtim_period
-\tjson_select ..
+	json_select config
+	json_get_vars channel htmode country hwmode band phy_band phy macaddr beacon_int dtim_period
+	json_select ..
 
-\tphy_ifname="$(rtl_find_phy "$phy")"
-\t[ -e "/proc/$phy_ifname/mib_all" ] || {
-\t\twireless_set_retry 0
-\t\twireless_setup_failed NO_DEVICE
-\t\treturn 1
-\t}
+	phy_ifname="$(rtl_find_phy "$phy" "$devname")"
+	[ -e "/proc/$phy_ifname/mib_all" ] || {
+		wireless_set_retry 0
+		wireless_setup_failed NO_DEVICE
+		return 1
+	}
 
-\tmkdir -p "$CFGDIR"
-\t[ -e /etc/Wireless ] || ln -s "$CFGDIR" /etc/Wireless
+	case "$channel" in
+		""|auto) channel=0 ;;
+	esac
 
-\tif [ -z "$phy_band" ]; then
-\t\tcase "$hwmode" in
-\t\t\t11a) phy_band=2 ;;
-\t\t\t*)
-\t\t\t\tif [ "${band:-0}" -ge 64 ] 2>/dev/null || [ "$band" = "4" ] || [ "$band" = "12" ]; then
-\t\t\t\t\tphy_band=2
-\t\t\t\telse
-\t\t\t\t\tphy_band=1
-\t\t\t\tfi
-\t\t\t\t;;
-\t\tesac
-\tfi
-\tif [ -z "$band" ]; then
-\t\t[ "$phy_band" = "2" ] && band=76 || band=11
-\tfi
-\tregdom="$(rtl_country_to_regdomain "$country")"
-\tFRAGFILE="$CFGDIR/radio_${phy_ifname}.dat"
+	if [ -z "$phy_band" ]; then
+		case "$hwmode" in
+			11a|a) phy_band=2 ;;
+			*)
+				if [ "${band:-0}" -ge 64 ] 2>/dev/null || [ "$band" = "4" ] || [ "$band" = "12" ]; then
+					phy_band=2
+				else
+					phy_band=1
+				fi
+				;;
+		esac
+	fi
+	if [ -z "$band" ]; then
+		[ "$phy_band" = "2" ] && band=76 || band=11
+	fi
+	regdom="$(rtl_country_to_regdomain "$country")"
+	FRAGFILE="$CFGDIR/radio_${phy_ifname}.dat"
 
-\tlock "$LOCKFILE"
-\t$IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
+	mkdir -p "$CFGDIR"
+	lock "$LOCKFILE"
+	[ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s "$CFGDIR" /etc/Wireless
+	$IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
 
-\t{
-\t\techo "${phy_ifname}_phyBandSelect=$phy_band"
-\t\techo "${phy_ifname}_band=$band"
-\t\techo "${phy_ifname}_regdomain=$regdom"
-\t\techo "${phy_ifname}_channel=${channel:-0}"
-\t\techo "${phy_ifname}_use40M=$(rtl_htmode_to_use40m "$htmode")"
-\t\techo "${phy_ifname}_2ndchoffset=$(rtl_htmode_to_offset "$htmode")"
-\t\t[ -n "$beacon_int" ]  && echo "${phy_ifname}_bcnint=$beacon_int"
-\t\t[ -n "$dtim_period" ] && echo "${phy_ifname}_dtimperiod=$dtim_period"
-\t} > "$FRAGFILE"
+	{
+		echo "${phy_ifname}_phyBandSelect=$phy_band"
+		echo "${phy_ifname}_band=$band"
+		echo "${phy_ifname}_regdomain=$regdom"
+		echo "${phy_ifname}_channel=$channel"
+		echo "${phy_ifname}_use40M=$(rtl_htmode_to_use40m "$htmode")"
+		echo "${phy_ifname}_2ndchoffset=$(rtl_htmode_to_offset "$htmode")"
+		echo "${phy_ifname}_bcnint=${beacon_int:-100}"
+		echo "${phy_ifname}_dtimperiod=${dtim_period:-1}"
+	} > "$FRAGFILE"
 
-\tfor_each_interface "ap" rtl8192cd_emit_vif
-\trtl_merge_fragments
+	for_each_interface "ap" rtl8192cd_emit_vif
+	if [ -z "$_rtl_vifs" ]; then
+		rm -f "$FRAGFILE"
+		rtl_merge_fragments
+		lock -u "$LOCKFILE"
+		wireless_setup_failed NO_VALID_VIF
+		return 1
+	fi
+	rtl_merge_fragments
 
-\t[ -n "$macaddr" ] && $IFCONFIG "$phy_ifname" hw ether "$macaddr"
-\tif ! $IFCONFIG "$phy_ifname" up; then
-\t\tlock -u "$LOCKFILE"
-\t\twireless_setup_failed IFUP_FAILED
-\t\treturn 1
-\tfi
-\tlock -u "$LOCKFILE"
+	if [ -n "$macaddr" ] && ! $IFCONFIG "$phy_ifname" hw ether "$macaddr"; then
+		lock -u "$LOCKFILE"
+		wireless_setup_failed BAD_MACADDR
+		return 1
+	fi
+	if ! $IFCONFIG "$phy_ifname" up; then
+		lock -u "$LOCKFILE"
+		wireless_setup_failed IFUP_FAILED
+		return 1
+	fi
+	lock -u "$LOCKFILE"
 
-\tfor v in $_rtl_vifs; do
-\t\twireless_add_vif "${v%%:*}" "${v##*:}"
-\tdone
+	for v in $_rtl_vifs; do
+		wireless_add_vif "${v%%:*}" "${v##*:}"
+	done
 
-\twireless_set_up
+	wireless_set_up
 }
 
 drv_rtl8192cd_teardown() {
-\tlocal phy_ifname
+	local devname="$1"
+	local phy_ifname phy
 
-\tjson_select config
-\tjson_get_vars phy
-\tjson_select ..
+	json_select config
+	json_get_vars phy
+	json_select ..
 
-\tphy_ifname="$(rtl_find_phy "$phy")"
-\tmkdir -p "$CFGDIR"
-\tlock "$LOCKFILE"
-\t[ -e "/proc/$phy_ifname/mib_all" ] && $IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
-\trm -f "$CFGDIR/radio_${phy_ifname}.dat"
-\trtl_merge_fragments
-\tlock -u "$LOCKFILE"
+	phy_ifname="$(rtl_find_phy "$phy" "$devname")"
+	mkdir -p "$CFGDIR"
+	lock "$LOCKFILE"
+	[ -e "/proc/$phy_ifname/mib_all" ] && $IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
+	rm -f "$CFGDIR/radio_${phy_ifname}.dat"
+	rtl_merge_fragments
+	lock -u "$LOCKFILE"
 
-\treturn 0
+	return 0
 }
 
 add_driver rtl8192cd
@@ -542,7 +637,7 @@ UCI_99_NETWORK="""#!/bin/sh
 # Configure RTL8367S switch0 VLANs (VID1=WAN port 4, VID2=LAN ports 0..3,
 # trunk cpu_port=6 tagged), RAM-boot LAN/WAN interfaces, and M3 dual-band Wi-Fi.
 mkdir -p /tmp/Wireless
-[ -e /etc/Wireless ] || ln -s /tmp/Wireless /etc/Wireless
+[ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s /tmp/Wireless /etc/Wireless
 [ "$(uci -q get system.@system[0].rsd0614_m3_seeded)" = "1" ] && exit 0
 
 [ -e /etc/config/wireless ] || touch /etc/config/wireless
@@ -622,19 +717,19 @@ INIT_RSD0614_NET="""#!/bin/sh /etc/rc.common
 START=97
 
 start() {
-\tmkdir -p /tmp/Wireless
-\t[ -e /etc/Wireless ] || ln -s /tmp/Wireless /etc/Wireless
-\t[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
-\t[ -w /sys/module/rtl819x/parameters/fabric_gw_rearm ] && echo 0 > /sys/module/rtl819x/parameters/fabric_gw_rearm
-\tswconfig dev switch0 set apply 1 >/dev/null 2>&1 || true
-\tlogger -t rsd0614-net "RTL8367S switch0 applied; hwnat=0 fabric_gw_rearm=0 lan=$(cat /sys/class/net/eth0.2/address 2>/dev/null || echo none)"
+	mkdir -p /tmp/Wireless
+	[ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s /tmp/Wireless /etc/Wireless
+	[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
+	[ -w /sys/module/rtl819x/parameters/fabric_gw_rearm ] && echo 0 > /sys/module/rtl819x/parameters/fabric_gw_rearm
+	swconfig dev switch0 set apply 1 >/dev/null 2>&1 || true
+	logger -t rsd0614-net "RTL8367S switch0 applied; hwnat=0 fabric_gw_rearm=0 lan=$(cat /sys/class/net/eth0.2/address 2>/dev/null || echo none)"
 }
 
 stop() {
-\t[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
+	[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
 }
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.0-m3-dualband-wifi-luci-ramboot\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.1-m3-wifi-pcie-hardened-ramboot\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)
@@ -695,7 +790,7 @@ def harden(tree,port,audit,expected=BASE):
             shutil.rmtree(old)
         else:old.rename(backup)
         stage.rename(old);mk.write_text(newmk,encoding='utf-8');cfg.write_text(newcfg,encoding='utf-8');irq.write_text(newirq,encoding='utf-8');boot.write_text(newboot,encoding='utf-8');defaultnet.write_text(newdefaultnet,encoding='utf-8');patch.parent.mkdir(parents=True,exist_ok=True);vgpatch.write_bytes(vgpatchdata);surveypatch.write_bytes(surveypatchdata);patch.write_bytes(patchdata);uartpatch.write_bytes(uartpatchdata);uartdiag.write_bytes(uartdiagdata);uartfix.write_bytes(uartfixdata)
-        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','vg_rgmii_pcie':'RTL8197FH-VG RGMII pad preservation (0x579fff7f), PITCR CF_FIX_IPG=1, P0GMIICR RX_delay=7, fabric_gw_rearm=0, PCIe0 40MHz VG MDIO 0x08=0x3101','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'stale pending cleared; PCIe0 BIT(21) enabled; NET BIT(15) armed by rtl865x_start; WMAC BIT(29) kept masked until rtl8197f_soc_probe; BIT(15)|BIT(21)|BIT(29) in mips_chip_irqs','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'generic eth0/eth1 synthesis suppressed; RSD0614 02_network + 99-rsd0614-network + rsd0614-net + lib/netifd/wireless/rtl8192cd.sh own switch0/eth0.2/eth0.1 and wlan0/wlan1','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
+        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','vg_rgmii_pcie':'RTL8197FH-VG RGMII pad preservation (0x579fff7f), PITCR CF_FIX_IPG=1, P0GMIICR RX_delay=7, fabric_gw_rearm=0, PCIe0 40MHz VG MDIO 0x08=0x3101','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'stale pending cleared; PCIe0 BIT(21) enabled; NET BIT(15) armed by rtl865x_start; WMAC BIT(29) kept masked through rtl8197f_soc_probe and unmasked only after request_irq in rtl8192cd_open; BIT(15)|BIT(21)|BIT(29) in mips_chip_irqs','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'generic eth0/eth1 synthesis suppressed; RSD0614 02_network + 99-rsd0614-network + rsd0614-net + lib/netifd/wireless/rtl8192cd.sh own switch0/eth0.2/eth0.1 and wlan0/wlan1','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
         (audit/'latest-source-isolation.json').write_text(json.dumps(result,indent=2)+'\n');print('SOURCE_ISOLATION: PASS (source mutation only, not a firmware boot test)');print('DEVICE_VARS includes DEV_PROFILE: PASS');print('RSD0614 VG RGMII/PCIe0 patch staged: PASS; target runtime NOT YET VERIFIED');print('RSD0614 omnibus read-only hardware survey patch staged: PASS; target runtime NOT YET VERIFIED');print('BH25Q64 kernel patch staged: PASS; target probe NOT YET VERIFIED');print('RTL8197F BUSY-replay delta staged after base 0004: PASS');print('RTL8197F bounded IRQ-cause diagnostic staged: PASS');print('RTL8197F runtime SoC-ID UART dispatch staged: PASS; hardware validation NOT YET VERIFIED');return result
     finally:
         if stage.exists():shutil.rmtree(stage)

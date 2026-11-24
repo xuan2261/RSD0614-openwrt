@@ -39,7 +39,7 @@ Completes M2 wired Gigabit on top of the hardware-verified `v5.5.0` `PCIe0` + `R
 ## Verification boundary
 
 - v5.3.9..v5.5.0 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), RGMII trunk (`5,781` pkts, 0 FCS errors), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` (`10ec:b814` BAR0/BAR2 assigned) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.5.1 CI OpenWrt compile & `deep_audit.py` (`29/29`): **PENDING**.
+- v5.5.1 CI OpenWrt compile & `deep_audit.py` (`29/29`): **PASS** (GitHub Actions run `#45379106697`, `5m02s` warm cache, `2,960,336` bytes / `0x002D2BD0`, SHA-256 `7bde54541c710954f59e7549f0b130ae46030a8de7b9cc779352a8e31280df65`).
 - v5.5.1 `eth0` 6-dword CPU-DMA wired Gigabit (`LAN` DHCP/SSH, `WAN` DHCP/NAT) on physical RSD0614 V1.0: **NOT YET VERIFIED**.
 - Disabled board peripherals (`pcie1`, `wmac` `RTL8197G`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

@@ -17,7 +17,7 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PENDING v5.5.1 CI BUILD",
+  "openwrt_compile": "PASS (CI run 45379106697, 5m02s warm cache, 2960336 bytes / 0x002D2BD0, SHA-256 7bde54541c710954f59e7549f0b130ae46030a8de7b9cc779352a8e31280df65, deep_audit 29/29 PASS)",
   "hardware_runtime": "NOT YET VERIFIED FOR v5.5.1",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",

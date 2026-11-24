@@ -18,26 +18,28 @@
   - **`wmac`**: `WMAC_STATUS=ok`, `SR64: 0x0->0x1f->0x0`, `BOND_STRAP=4` (`97FN`), `REG_000=0x51c0b2f3`, `REG_0F0=0x0c591139` (`CUT_VER=1`), **`REG_0FC=0x00000015` (`WMAC_HAL_TYPE_ID=21` = `HAL_HW_TYPE_ID_8197G`)**, `REG_100=0xeaeaeaea`.
   - **`pcie0`**: `PCIE0_STATUS=link_up`, `XTAL_MHZ=40`, `LTSSM=0x030e9d11` (`L0`), `RC_ID=0x819710ec`, **`EP_ID=0xb81410ec` (`10ec:b814` = `RTL8814BR`)**, `EP_CLASS=0x02800000`, `EP_SUBSYS=0xb81410ec`.
 
-## v5.5.0 scope — M2 Consolidated Wired Gigabit + PCIe0 RAM-Boot (`v5.5.0-wired-pcie-ramboot`)
+- **v5.5.0 (`v5.5.0-wired-pcie-ramboot`) hardware run on physical Rock Space RSD0614 V1.0** (CI run `#45364422799`, `2,959,120` bytes / `0x002D2710`, SHA-256 `b9795cc5bb5d400f2c88e38c3b99749103834fb12699bdd2a663ac5f0dfe36be`):
+  - **`PCIe0` (`10ec:b814` `RTL8814BR`) Linux PCI subsystem**: **PASS** (`LTSSM=0x03d78a11`, `clk=40000000Hz`, `link_up=1`, `0000:00:00.0 10ec:8197`, `0000:01:00.0 10ec:b814 class=0x028000`, BAR0 `io 0x18c00000` & BAR2 `mem 0x19000000-0x1900ffff 64bit`).
+  - **`RTL8367S` Gigabit switch (`gpio1 24/23` -> GPIOs 472/471) & RGMII trunk**: **PASS** (`RTL8367S chip found`, Port 2 & Port 6 `1000baseT full-duplex`, `VLAN 1: 4 6t`, `VLAN 2: 0 1 2 3 6t`, `5,781` packets, `0` FCS errors; `PITCR=00001001`, `P0GMIICR=060f7d57`, `PCRP0=16942039`, `EXTPCR0=00080000`, `PAD=579fff7f`; `USEDDSC` rose from `18` to `100` under LAN traffic).
+  - **Root cause isolated for `eth0` `rx_pkts=0` + `CPUIISR=00020000` runout storm**: bootloader printed `use Switch new descriptor` and left `CPUICR1=0x00186183` (`CF_RXDESC=6`, `CF_TXDESC=6`, `CF_PKT_HDR_TYPE=1` `TX_PKTHDR_SHORTCUT_LSO` single-level 6-dword/24-byte descriptor mode), while donor `rtl819x_swnic.c` only drove legacy 2-level (`rtl_pktHdr` + `rtl_mBuf`) 4-byte pointer rings without resetting `CPUICR1` or supporting 6-dword descriptors.
 
-Every verified wired/bus peripheral is consolidated into a single RAM-boot image:
-- **External `RTL8367S` 5-port Gigabit switch + `rtl819x` SoC MAC (`9996-rsd0614-vg-rgmii-and-pcie.patch`)**:
-  - `rtl8367b` enabled on exact verified SMI pins (`gpio-sck = <&gpio1 24 GPIO_ACTIVE_HIGH>`, `gpio-sda = <&gpio1 23 GPIO_ACTIVE_HIGH>`, `cpu_port = <6>`) without disturbing `PH2` (`gpio1 26` hardware `RESET#`);
-  - `RTL8197FH-VG` (`0x81970000`) RGMII fixes: preserves VG `0xB8000850` (`PAD_P0_RGMII_MODE` bit 25 / `0x579fff7f`), sets `EXTPCR0[19:16]=8` + `PITCR[17:12]=1` (`CF_FIX_IPG`), defaults `P0GMIICR` to verified `TX_delay=1, RX_delay=7` (tunable via `p0_rx_delay`/`p0_tx_delay`), and defaults `fabric_gw_rearm=0` on `rockspace,rsd0614`;
-  - Standard OpenWrt L2 + Linux software routing/NAT/DHCP/SSH: `switch0` VLAN 1 (`4 6t`, WAN `eth0.1` DHCP, MAC `02:06:14:00:00:02`) and VLAN 2 (`0 1 2 3 6t`, LAN `br-lan` `eth0.2` `192.168.1.1/24`, MAC `02:06:14:00:00:01`), `hwnat=0`, `fabric_gw_rearm=0`, `swconfig dev switch0 set apply 1` via `etc/init.d/rsd0614-net` (`START=97`, no `USE_PROCD`).
-- **Physical Reset button**: `gpio-keys-polled` `reset` (`KEY_RESTART`) on verified `<&gpio1 4 GPIO_ACTIVE_LOW>`.
-- **40 MHz `PCIe0` bus**: `&pcie_clk` set to `40000000`, `&pcie0` enabled with Realtek SDK v3.6.0 VG MDIO tuning (`0x08=0x3101`), and `GIMR BIT(21)` unmasked for `10ec:b814` (`RTL8814BR`) PCI enumeration.
-- **Why Wi-Fi moves cleanly to M3**: `v5.4.2` silicon probe proved BOTH radios require Realtek SDK v3.6.0 HALs — on-SoC 2.4 GHz WMAC is **`RTL8197G` (`HAL 0x15`)** (not `RTL8197F` `0x0E` from donor SDK v3.4.11e) and PCIe0 5 GHz is **`RTL8814BR` (`10ec:b814`, `HAL 0x11`)**. Keeping `&wmac` disabled and `BIT(29)` masked in `v5.5.0` delivers a rock-solid wired Gigabit + PCIe0 milestone first.
+## v5.5.1 scope — M2 RTL8197FH-VG 6-Dword New-Descriptor Wired Gigabit + PCIe0 RAM-Boot (`v5.5.1-vg-newdesc-ramboot`)
+
+Completes M2 wired Gigabit on top of the hardware-verified `v5.5.0` `PCIe0` + `RTL8367S` + RGMII trunk stack (`9996-rsd0614-vg-rgmii-and-pcie.patch`):
+- **Native 6-dword (24-byte) single-level `New_swNic` RX/TX engine** matching Realtek SDK v3.6.0 / `RTL8197FH-VG` silicon (`CPUICR1=0x001861d3` with `CF_RXDESC=6`, `CF_TXDESC=6`, `TX_PKTHDR_SHORTCUT_LSO`, `cf_rx_gather=0`; `DMA_CR1=(txCnt-1)*24`; `DMA_CR4=TX_RING0_TAIL_AWARE`; `TXRINGCR=TX_RING0_EN`; `CPUQDM0/2/4=0`; `CPURMDCR0=0`; `MACCTRL1|=CF_CMAC_CLK_SEL`), re-verified after `SIRR=TRXRDY` for the VG stopped-state write-discard erratum.
+- **Runtime A/B knobs without rebuilding**: `/sys/module/rtl819x/parameters/desc_mode` (`-1=auto`: `1` on VG / `0` on non-VG; setting `0` cleanly switches to legacy 2-level `CPUICR1=0x00000082`, `DMA_CR4=0`, `CPURMDCR0=rxMring.phys` on `eth0 down/up`), `new_tx_vlantag` (`0x3f`), `new_tx_extspa` (`0`), `p0_rx_delay` (`-1=auto: 7`), `p0_tx_delay` (`-1=auto: 1`).
+- **Storm protection & clean VLAN demux**: masks persistent `PKTHDR_DESC_RUNOUT_IE_ALL | MBUF_DESC_RUNOUT_IE_ALL` when `rx_done == 0` (relying on the 10 ms watchdog), rate-limits `rtl819x isr#`, routes untagged RX fallback by `info.vid`/`info.pid`, and targets per-VLAN jack portmasks (`0x0F` LAN / `0x10` WAN) on new-descriptor TX.
+- **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` and `wmac` (`RTL8197G` `HAL 0x15`) stay disabled with `BIT(29)` masked, and persistent flash remains **NO-GO**.
 
 ## Consolidated Roadmap (M2 -> M3)
 
-1. **M2 (`v5.5.0-wired-pcie-ramboot` — this build, hardware runtime `NOT YET VERIFIED`)**: Verify full Gigabit wired router (`LAN` `192.168.1.1` DHCP/SSH, `WAN` DHCP/NAT, `swconfig dev switch0 show`), `Reset` button event, and `PCIe0` `10ec:b814` enumeration in RAM.
+1. **M2 (`v5.5.1-vg-newdesc-ramboot` — this build, hardware runtime `NOT YET VERIFIED`)**: Verify full Gigabit wired router (`eth0.2` LAN `192.168.1.1` DHCP/ping/SSH, `eth0.1` WAN DHCP/NAT, `swconfig dev switch0 show`) alongside already-verified `PCIe0` `10ec:b814` and Reset button in RAM.
 2. **M3 (Dual-band Wi-Fi — `RTL8197G` `HAL 0x15` 2.4 GHz + `RTL8814BR` `10ec:b814` 5 GHz)**: Integrate Realtek SDK v3.6.0 `rtl8192cd` driver/HAL supporting both `HAL_HW_TYPE_ID_8197G` (`0x15`) and `HAL_HW_TYPE_ID_8814B` (`0x11`) with runtime read-only `/dev/mtd1ro` calibration in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
 
 ## Verification boundary
 
-- v5.3.9, v5.4.1 & v5.4.2 `ttyS0` shell, `spi0` `BH25Q64` read-only MTDs, passive `SYSC`/`PINMUX`/`GPIO`/`SWCORE` register survey, `GPIO1_4` button, `RTL8367S` (`smi_pefgh_24_23`), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` `10ec:b814` Link UP on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.5.0 CI OpenWrt compile & `deep_audit.py` (`29/29`): **PASS** (GitHub Actions run `#45364422799`, `5m19s` warm cache, `2,959,120` bytes / `0x002D2710`, SHA-256 `b9795cc5bb5d400f2c88e38c3b99749103834fb12699bdd2a663ac5f0dfe36be`).
-- v5.5.0 wired Gigabit (`eth0.2`/`eth0.1`/`switch0`), Reset button, and `PCIe0` Linux driver runtime on physical RSD0614 V1.0: **NOT YET VERIFIED**.
+- v5.3.9..v5.5.0 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), RGMII trunk (`5,781` pkts, 0 FCS errors), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` (`10ec:b814` BAR0/BAR2 assigned) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
+- v5.5.1 CI OpenWrt compile & `deep_audit.py` (`29/29`): **PENDING**.
+- v5.5.1 `eth0` 6-dword CPU-DMA wired Gigabit (`LAN` DHCP/SSH, `WAN` DHCP/NAT) on physical RSD0614 V1.0: **NOT YET VERIFIED**.
 - Disabled board peripherals (`pcie1`, `wmac` `RTL8197G`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

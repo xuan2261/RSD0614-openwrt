@@ -18,6 +18,10 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     if not ethsrc.is_file():raise ValueError('Missing compiled rtl819x-eth.c: '+str(ethsrc))
     ethtext=ethsrc.read_text()
     for token in (
+        'New_swNic_program_regs(false);',
+        'New_swNic_program_regs(true);',
+        'REG32(MACCTRL1) |= CF_CMAC_CLK_SEL;',
+        'iimr &= ~(PKTHDR_DESC_RUNOUT_IE_ALL | MBUF_DESC_RUNOUT_IE_ALL);',
         'bool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);',
         'REG32(0xB8000850) = 0x579fff7fu;',
         'u32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);',
@@ -25,7 +29,36 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'if (of_machine_is_compatible("rockspace,rsd0614"))',
         'fabric_gw_rearm = 0;',
     ):
-        if token not in ethtext:raise ValueError('RTL8197FH-VG RGMII/trunk patch missing from compiled rtl819x-eth.c: '+token)
+        if token not in ethtext:raise ValueError('RTL8197FH-VG RGMII/newdesc patch missing from compiled rtl819x-eth.c: '+token)
+    swnicsrc=linux/'drivers/net/ethernet/rtl819x/rtl819x_swnic.c'
+    if not swnicsrc.is_file():raise ValueError('Missing compiled rtl819x_swnic.c: '+str(swnicsrc))
+    swnictext=swnicsrc.read_text()
+    for token in (
+        'struct rtl_new_rx_desc',
+        'struct rtl_new_tx_desc',
+        'BUILD_BUG_ON(sizeof(struct rtl_new_rx_desc) != 24);',
+        'BUILD_BUG_ON(sizeof(struct rtl_new_tx_desc) != 24);',
+        'bool rtl819x_use_new_desc(void)',
+        'void New_swNic_program_regs(bool post_start)',
+        'TX_PKTHDR_SHORTCUT_LSO',
+        'REG32(DMA_CR1) = (txCnt - 1) * sizeof(struct rtl_new_tx_desc);',
+        'REG32(DMA_CR4) = TX_RING0_TAIL_AWARE;',
+        'New_swNic_receive_newdesc',
+        'if (!new_desc_active)',
+    ):
+        if token not in swnictext:raise ValueError('RTL8197FH-VG 6-dword new-descriptor engine missing from compiled rtl819x_swnic.c: '+token)
+    regssrc=linux/'drivers/net/ethernet/rtl819x/rtl819x_regs.h'
+    if not regssrc.is_file():raise ValueError('Missing compiled rtl819x_regs.h: '+str(regssrc))
+    regstext=regssrc.read_text()
+    for token in (
+        '#define CPUQDM0',
+        '#define TX_PKTHDR_SHORTCUT_LSO',
+        '#define CF_RXDESC_OFFSET',
+        '#define CF_TXDESC_OFFSET',
+        '#define MACCTRL1',
+        '#define CF_CMAC_CLK_SEL',
+    ):
+        if token not in regstext:raise ValueError('RTL8197FH-VG new-descriptor register defs missing from compiled rtl819x_regs.h: '+token)
     pcisrc=linux/'arch/mips/pci/pci-realtek.c'
     if not pcisrc.is_file():raise ValueError('Missing compiled pci-realtek.c: '+str(pcisrc))
     pcitext=pcisrc.read_text()
@@ -151,7 +184,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('rtl819x_swnic.c','drivers/net/ethernet/rtl819x/rtl819x_swnic.c'),('rtl819x_regs.h','drivers/net/ethernet/rtl819x/rtl819x_regs.h'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)

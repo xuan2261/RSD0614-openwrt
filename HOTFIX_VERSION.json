@@ -1,9 +1,9 @@
 {
-  "version": "5.5.0-wired-pcie-ramboot",
-  "base": "5.4.2-omnibus-readonly-survey",
-  "change": "M2 consolidated wired Gigabit + PCIe0 RAM-boot bring-up based on v5.4.1/v5.4.2 silicon verification: enable RTL8367S switch (gpio1 24 SCK / gpio1 23 SDA, EXT1 cpu_port=6, LAN 0..3 VID2 eth0.2 192.168.1.1, WAN 4 VID1 eth0.1 DHCP), RTL8197FH-VG RGMII pad preservation (0x579fff7f) + PITCR CF_FIX_IPG=1 + P0GMIICR RX_delay=7 + fabric_gw_rearm=0, physical Reset button (gpio1 4), and 40 MHz PCIe0 (10ec:b814 RTL8814BR with VG MDIO 0x08=0x3101); keep all 6 MTD partitions read-only and wmac (RTL8197G HAL 0x15) / pcie1 disabled until M3",
-  "volume": "rsd0614-openwrt-v550-work",
-  "volume_label": "rsd0614.work=v5.5.0",
+  "version": "5.5.1-vg-newdesc-ramboot",
+  "base": "5.5.0-wired-pcie-ramboot",
+  "change": "M2 wired Gigabit completion for RTL8197FH-VG after v5.5.0 hardware verification proved PCIe0 (10ec:b814), RTL8367S (1000M/FD), and RGMII trunk (5781 pkts, 0 FCS errors) working while isolating eth0 rx_pkts=0 + CPUIISR=00020000 runout storm to bootloader CPUICR1=0x00186183 (new 6-dword descriptor mode vs legacy 2-level rings): implement native 6-dword (24-byte) single-level RX/TX engine (CPUICR1=0x001861d3, DMA_CR1=(txCnt-1)*24, DMA_CR4=TX_RING0_TAIL_AWARE, TXRINGCR=TX_RING0_EN, CPUQDM0/2/4=0, MACCTRL1|=CF_CMAC_CLK_SEL) with runtime desc_mode A/B fallback (0=legacy 0x82), post-TRXRDY reg re-verification, and runout ISR storm guard; keep all 6 MTD partitions read-only and wmac/pcie1 disabled until M3",
+  "volume": "rsd0614-openwrt-v551-work",
+  "volume_label": "rsd0614.work=v5.5.1",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -17,7 +17,8 @@
     "rsd0614-openwrt-v539-work",
     "rsd0614-openwrt-v540-work",
     "rsd0614-openwrt-v541-work",
-    "rsd0614-openwrt-v542-work"
+    "rsd0614-openwrt-v542-work",
+    "rsd0614-openwrt-v550-work"
   ],
   "persistent_flash": "NO-GO"
 }

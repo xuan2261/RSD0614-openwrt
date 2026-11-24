@@ -41,7 +41,7 @@ Consolidates all remaining RAM-boot router capabilities on top of the 100% hardw
 ## Verification boundary
 
 - v5.3.9..v5.5.1 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), `RTL8197FH-VG` 6-dword `eth0` wired Gigabit (`ping 192.168.1.1` 1ms 0% loss, Dropbear SSH), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` (`10ec:b814` BAR0/BAR2 assigned) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.0 CI OpenWrt compile & `deep_audit.py`: **PENDING M3 BUILD**.
+- v5.6.0 CI OpenWrt compile & `deep_audit.py` (`30/30`): **PASS** (GitHub Actions run `#45399545588`, `6m34s` warm cache, `4,179,472` bytes / `0x003FC610`, `decoded_size=14,394,009` bytes / `13.73 MiB`, SHA-256 `931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22`).
 - v5.6.0 dual-band Wi-Fi (`wlan0` 5 GHz + `wlan1` 2.4 GHz) & LuCI web GUI on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.0**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

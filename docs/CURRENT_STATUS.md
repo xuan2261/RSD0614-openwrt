@@ -60,7 +60,7 @@ Consolidates all fixes for the `v5.6.1` physical hardware findings plus preventi
 ## Verification boundary
 
 - v5.3.9..v5.6.1 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2), `RTL8197FH-VG` 6-dword `eth0` (`newdesc=1`, DHCP, `ping`), `PCIe0` first-attempt link-up (`LTSSM=0x039b4f11`, `10ec:b814`), and `rtl8192cd.ko` dual-radio probe + read-only `/dev/mtd1` factory calibration on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.2 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` audit & `deep_audit.py`: **PENDING_CI_RUN_V562**.
+- v5.6.2 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` audit & `deep_audit.py`: **PASS** (CI run `#45520998735`, `6m25s`, `4,220,464` bytes / `0x00406630`, `decoded_size=14,611,097` bytes / `13.93 MiB`, SHA-256 `6cdc86de0a0d346cd7cb6fedf4408237060b823d0bb20d9969de0442c25f88b3`, `32/32` offline policy checks PASS, `rtl8192cd.ko` `undef=157 missing=0 proc_init=1 giwname=1 bss=689152B`).
 - v5.6.2 full-MTU LuCI/SSH over `RTL8367S` (`maxLen088c=0610`) and live `RSD0614-OpenWrt-5G` / `RSD0614-OpenWrt-2G` AP broadcast on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.2**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

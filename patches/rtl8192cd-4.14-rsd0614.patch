@@ -1,7 +1,16 @@
 diff --git a/8192cd_cfg.h b/8192cd_cfg.h
-index 29968c4..1dc4221 100755
+index 29968c4..3a1c9e1 100755
 --- a/8192cd_cfg.h
 +++ b/8192cd_cfg.h
+@@ -434,7 +434,7 @@
+ //-------------------------------------------------------------
+ #define INCLUDE_PROC_FS
+ #if defined(CONFIG_PROC_FS) && defined(INCLUDE_PROC_FS) && \
+-	!defined(CONFIG_RTL8192CD_LINUX6_BUS)
++	(!defined(CONFIG_RTL8192CD_LINUX6_BUS) || (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)))
+ 	#define _INCLUDE_PROC_FS_
+ #endif
+ 
 @@ -4485,6 +4485,31 @@
  
  #endif /* #if defined(CONFIG_RTL8672) && defined(RX_BUFFER_GATHER) && !defined(__OSK__)*/
@@ -35,7 +44,7 @@ index 29968c4..1dc4221 100755
  // NFJROM CONFIG
  //-------------------------------------------------------------
 diff --git a/8192cd_comapi.c b/8192cd_comapi.c
-index cce51db..24dcf3e 100755
+index cce51db..7639b63 100755
 --- a/8192cd_comapi.c
 +++ b/8192cd_comapi.c
 @@ -512,10 +512,10 @@ int rtl_wx_get_sens(struct net_device *dev,
@@ -51,7 +60,42 @@ index cce51db..24dcf3e 100755
  #if 0
  	priv->reauth_count = 0;
  	priv->reassoc_count = 0;
-@@ -3620,24 +3620,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
+@@ -659,6 +659,34 @@ int rtl_wx_get_freq(struct net_device *dev,
+ }
+ #endif // WIFI_WPAS_CLI
+ 
++int rtl_giwname(struct net_device *dev,
++			struct iw_request_info *info,
++			union iwreq_data *wrqu, char *extra)
++{
++	RTL_PRIV *priv = GET_DEV_PRIV(dev);
++	unsigned int net_type = 0;
++	int len;
++
++	(void)info;
++	(void)extra;
++	if (priv && priv->pmib)
++		net_type = priv->pmib->dot11BssType.net_work_type;
++
++	len = snprintf(wrqu->name, sizeof(wrqu->name), "IEEE 802.11");
++	if (net_type & WIRELESS_11A)
++		len += snprintf(wrqu->name + len, sizeof(wrqu->name) - len, "a");
++	if (net_type & WIRELESS_11B)
++		len += snprintf(wrqu->name + len, sizeof(wrqu->name) - len, "b");
++	if (net_type & WIRELESS_11G)
++		len += snprintf(wrqu->name + len, sizeof(wrqu->name) - len, "g");
++	if (net_type & WIRELESS_11N)
++		len += snprintf(wrqu->name + len, sizeof(wrqu->name) - len, "n");
++	if (net_type & WIRELESS_11AC)
++		len += snprintf(wrqu->name + len, sizeof(wrqu->name) - len, "ac");
++
++	return 0;
++}
++
+ int rtl_siwfreq(struct net_device *dev,
+ 			struct iw_request_info *info,
+ 			union iwreq_data *wrqu, char *extra)
+@@ -3620,24 +3648,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
  	int ret = 0;
  
  	oldfs = get_fs();
@@ -80,7 +124,7 @@ index cce51db..24dcf3e 100755
  
  err_close:
  	filp_close(fp, NULL);
-@@ -3713,8 +3708,9 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3713,13 +3736,16 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		return -1;
  	}
  	
@@ -91,7 +135,14 @@ index cce51db..24dcf3e 100755
  		return -1;
  	}
  	
-@@ -3731,7 +3727,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+ 	if((valstr = (unsigned char *)kmalloc(MAX_PARAM_BUF_SIZE, GFP_ATOMIC)) == NULL) {
+ 		printk("%s(%d): not enough memory\n", __FUNCTION__, __LINE__);
++		kfree(mibstr);
++		kfree(cmd_buf);
+ 		return -1;
+ 	}
+ 	
+@@ -3731,7 +3757,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		//int i=0;
  		
  		memset(cmd_buf, 0, MAX_PARAM_BUF_SIZE);
@@ -100,7 +151,7 @@ index cce51db..24dcf3e 100755
  		memset(valstr, 0, MAX_PARAM_BUF_SIZE);
  		
  		line_head = next_head;
-@@ -3748,6 +3744,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3748,6 +3774,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  #ifdef VENDOR_PARAM_COMPATIBLE	
  		/* To compatible with other vendor's parameters, each parameter must have its own process function - chris*/
  		loc = strchr(mibstart, '=');
@@ -109,7 +160,7 @@ index cce51db..24dcf3e 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - miblen -1;
  		if (vallen>0) {			
-@@ -3770,6 +3768,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3770,6 +3798,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			continue;
  		
  		loc = strchr(mibstart, '=');
@@ -118,7 +169,7 @@ index cce51db..24dcf3e 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - (strlen(dev->name)+1) - (miblen+1);
  		
-@@ -3777,8 +3777,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3777,8 +3807,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			
  			ret = set_mib(priv, mibstart);
  			if (ret < 0) {
@@ -157,10 +208,29 @@ index 4790ff5..7165275 100755
  
  #endif
 diff --git a/8192cd_ioctl.c b/8192cd_ioctl.c
-index 9768da7..f77d4c6 100755
+index 9768da7..cb32192 100755
 --- a/8192cd_ioctl.c
 +++ b/8192cd_ioctl.c
-@@ -16623,7 +16623,11 @@ int rtl8192cd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+@@ -981,6 +981,9 @@ struct iw_handler_def {
+ 	struct iw_statistics*	(*get_wireless_stats)(struct net_device *dev);
+ };
+ 
++extern int rtl_giwname(struct net_device *dev,
++				struct iw_request_info *info,
++				union iwreq_data *wrqu, char *extra);
+ extern int rtl_siwfreq(struct net_device *dev,
+ 				struct iw_request_info *info,
+ 				union iwreq_data *wrqu, char *extra);
+@@ -1083,7 +1086,7 @@ static const iw_handler rtl_iwhandler[] =
+ 	(iw_handler) rtl_wx_dummy,                              /* SIOCSIWNWID   */
+ 	(iw_handler) rtl_wx_dummy,                              /* SIOCGIWNWID   */
+ #else
+-	(iw_handler) NULL /* supported */,		/* SIOCGIWNAME	 */
++	(iw_handler) rtl_giwname,				/* SIOCGIWNAME	 */
+ 	(iw_handler) NULL,						/* SIOCSIWNWID	 */
+ 	(iw_handler) NULL,						/* SIOCGIWNWID	 */
+ #endif
+@@ -16623,7 +16626,11 @@ int rtl8192cd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
  #ifdef __OSK__
  #define VERIFY_WRITE 1
  #endif
@@ -172,7 +242,7 @@ index 9768da7..f77d4c6 100755
  			if (!ret) {
  				ret = -EFAULT;
  				DEBUG_ERR("user space valid check error!\n");
-@@ -20157,7 +20161,7 @@ case SIOC_SHIFT_POWER_INDEX:
+@@ -20157,7 +20164,7 @@ case SIOC_SHIFT_POWER_INDEX:
  	}
  #endif
  
@@ -182,7 +252,7 @@ index 9768da7..f77d4c6 100755
  	{
  		priv->pshare->wlangeneral_pid= -1;
 diff --git a/8192cd_osdep.c b/8192cd_osdep.c
-index 90c8937..c99e3f5 100755
+index 90c8937..effa8cf 100755
 --- a/8192cd_osdep.c
 +++ b/8192cd_osdep.c
 @@ -10169,6 +10169,8 @@ priv->pshare->curr_band =0; //init curr_band value
@@ -342,7 +412,22 @@ index 90c8937..c99e3f5 100755
  #endif
  
  #ifdef CONFIG_PUMA_UDMA_SUPPORT
-@@ -20452,7 +20491,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
+@@ -18350,8 +18389,13 @@ register_driver:
+ 		rtl8197f_wlan_phase_set(130, "netdev-register", 0);
+ 	rc = osk_register_netdev(dev);
+ #else
+-	if (vap_idx < 0)
++	if (vap_idx < 0) {
++#ifdef CONFIG_RTL8192CD_LINUX6_BUS
++		if (wdev->linux6_managed && priv->pshare && priv->pshare->linux_dev)
++			SET_NETDEV_DEV(dev, priv->pshare->linux_dev);
++#endif
+ 		rtl8197f_wlan_phase_set(130, "netdev-register", 0);
++	}
+ 	rc = register_netdev(dev);
+ #endif
+ 
+@@ -20452,7 +20496,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
          .ndo_stop               = rtl8192cd_close,
          .ndo_set_mac_address    = rtl_pseudo_dev_set_hwaddr,
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -351,7 +436,7 @@ index 90c8937..c99e3f5 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -20530,7 +20569,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
+@@ -20530,7 +20574,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -360,7 +445,7 @@ index 90c8937..c99e3f5 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -22818,7 +22857,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
+@@ -22818,7 +22862,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_vdev_get_stats,
@@ -485,10 +570,35 @@ index 9187036..5e4ee26 100755
              else
  #endif
 diff --git a/WlanHAL/RTL88XX/Hal88XXTxDesc.c b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
-index 565c2c4..14d8468 100755
+index 565c2c4..3125e19 100755
 --- a/WlanHAL/RTL88XX/Hal88XXTxDesc.c
 +++ b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
-@@ -8868,10 +8868,28 @@ original:
+@@ -1905,9 +1905,12 @@ SyncSWTXBDHostIdxToHW88XX (
+          * 8822B producer/consumer register and request the existing vendor TX
+          * DSR after each latency-critical MGT/HI0 doorbell.  The tasklet still
+          * owns all ring locking and frees descriptors only after HW advances. */
+-        if (Adapter && Adapter->pshare && IS_HARDWARE_TYPE_8822B(Adapter) &&
++        if (Adapter && Adapter->pshare &&
++            (IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8814B(Adapter)) &&
+             Adapter->pshare->linux6_radio_index == 0 && cur_q->reg_rwptr_idx) {
+-            if (queueIndex == HCI_TX_DMA_QUEUE_MGT || queueIndex == HCI_TX_DMA_QUEUE_HI0) {
++            u4Byte hi0_q = IS_HARDWARE_TYPE_8814B(Adapter) ?
++                HCI_TX_DMA_QUEUE_HI0_V2 : HCI_TX_DMA_QUEUE_HI0;
++            if (queueIndex == HCI_TX_DMA_QUEUE_MGT || queueIndex == hi0_q) {
+                 u4Byte mw5_rw = HAL_RTL_R32(cur_q->reg_rwptr_idx);
+                 if (queueIndex == HCI_TX_DMA_QUEUE_MGT) {
+                     u2Byte mw5_host = mw5_rw & 0x0fff;
+@@ -1971,7 +1974,8 @@ SyncSWTXBDHostIdxToHW88XX (
+                         break;
+                     }
+ 
+-                    if (Adapter->pshare->linux6_tx_dma_maps >
++                    if (IS_HARDWARE_TYPE_8814B(Adapter) ||
++                        Adapter->pshare->linux6_tx_dma_maps >
+                         Adapter->pshare->linux6_tx_dma_unmaps + 256) {
+                         u2Byte mw5_host = mw5_rw & 0x0fff;
+                         u2Byte mw5_hw = (mw5_rw >> 16) & 0x0fff;
+@@ -8868,10 +8872,28 @@ original:
  #endif
  #if IS_RTL8814B_SERIES
          if (IS_HARDWARE_TYPE_8814B(Adapter)) {

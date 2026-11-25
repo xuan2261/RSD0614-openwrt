@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.6.1",
+  "bundle_version": "5.6.2",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 135,
+  "regression_tests_per_run": 137,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (CI run 45434537894, 6m19s warm cache, 4183280 bytes / 0x003FD4F0, decoded_size 14397593 bytes / 13.73 MiB, SHA-256 5a7d31aa451fd386e1063a5fe0f73ba218359f9fd5c3e02e4e739cee2a7a5b35, deep_audit 31/31 PASS, rtl8192cd.ko ELF ksymtab 147/147 resolved / 0 missing / .bss 689648B)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.1",
+  "openwrt_compile": "PENDING_CI_RUN_V562",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.2",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.6.0 physical RAM-boot verified wired Gigabit eth0 (newdesc=1, rx_pkts=649, runout=0, CPUIISR=00000000), RTL8367S, BH25Q64 6 read-only MTDs, LuCI/uhttpd + 40.9 MiB free RAM, and netifd UCI wireless parsing, while isolating two boot blockers fixed in v5.6.1: (1) rtl8192cd: Unknown symbol sk_pacing_shift_update (err 0), and (2) intermittent PCIe RC0 LTSSM=0x0c454504 (Polling.Config) link_up=0",
-  "preflight": "PASS (135/135 local & CI regression tests)",
-  "previous_build_result": "v5.6.0 run 45399545588: compile (6m34s warm cache), deep_audit (30/30 PASS), 4179472 bytes / 0x003FC610, decoded_size 14394009 bytes (13.73 MiB), SHA-256 931259c4f1e88e6b5084844133d5067e9440fe4f417bf23eb006a313e0829d22"
+  "previous_hardware_result": "v5.6.1 physical RAM-boot verified clean PCIe0 link_up=1 (attempt 1/3, LTSSM=0x039b4f11, 10ec:b814), rtl8192cd.ko load + read-only /dev/mtd1 Tenda KV factory calibration (65536B) on BOTH wlan0 (RTL8814BR 5 GHz, rfe_type=1) and wlan1 (RTL8197G 2.4 GHz, HAL 0x15), DHCP lease 192.168.1.106, and ping, while isolating all 3 remaining runtime blockers fixed in v5.6.2: (1) RTL8367S 0x088c=0x05f2 (1522B) max-frame drop on 1526B CPU-tag+802.1Q full-MTU LuCI/SSH TCP frames + _New_swNic_send CPUICR bit 29 clobber, (2) _INCLUDE_PROC_FS_ disabled + rtl8192cd.sh /proc/.../mib_all gate aborting with NO_DEVICE before ifconfig wlan0/wlan1 up, and (3) normal 3-unplugged-port USEDDSC=345 > 256 false PRESSURE spam & false 5s RX-STALL WEDGE reset",
+  "preflight": "PASS (137/137 local & CI regression tests)",
+  "previous_build_result": "v5.6.1 run 45434537894: compile (6m19s warm cache), deep_audit (31/31 PASS), 4183280 bytes / 0x003FD4F0, decoded_size 14397593 bytes (13.73 MiB), SHA-256 5a7d31aa451fd386e1063a5fe0f73ba218359f9fd5c3e02e4e739cee2a7a5b35"
 }

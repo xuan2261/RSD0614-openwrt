@@ -1,9 +1,9 @@
 {
-  "version": "5.6.1-m3-wifi-pcie-hardened-ramboot",
-  "base": "5.6.0-m3-dualband-wifi-luci-ramboot",
-  "change": "Consolidated hardened M3 RAM-boot build fixing every runtime issue observed in v5.6.0 physical boot log and parallel full-stack code audit: (1) guard sk_pacing_shift_update for Linux 4.14.187 (sole missing symbol blocking rtl8192cd.ko load) + fail-closed ELF32-LE SHN_UNDEF vs vmlinux __ksymtab verifier; (2) enable CONFIG_RTL_SHRINK_MEMORY_SIZE=y with 256 TX/RX rings and 2600B RX SKBs (fits 64 MiB DDR2 + initramfs without order-10 GFP_ATOMIC OOM); (3) enable coherent TXBD/TXDESC/beacon DMA for RTL8814B and fix MIPS32 >>32 UB, InterruptMaskExt typo, GIMR BIT(29) post-request_irq unmask lifecycle, 0xB8000064 readback fence, colon-MAC/fallback tolerance in cfg loader, and mibstr buffer bounds; (4) synchronize PCIe0 PWRCR/PERST# reset with readback fences and 3-attempt bounded retry (eliminates LTSSM 0x0c454504 Polling.Config race); (5) silence steady-state rtl819x DP poll#/isr# UART spam via dp_heartbeat=0; (6) fix rtl8192cd.sh 2ndchoffset/psk-mixed encmode=4/explicit MIB defaults and patch LuCI wireless.js with rtl8192cd WPA2/PSK modes; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v561-work",
-  "volume_label": "rsd0614.work=v5.6.1",
+  "version": "5.6.2-m3-wifi-mtu-hardened-ramboot",
+  "base": "5.6.1-m3-wifi-pcie-hardened-ramboot",
+  "change": "Consolidated hardened M3 RAM-boot build fixing every runtime failure observed on physical RSD0614 V1.0 in v5.6.1: (1) program RTL8367S (0x6367) max-frame length CFG0/CFG1 (0x088c/0x088d) = 0x0610 (1552B) and select CFG0 in 0x1200[14:13]=0x6000 & 0x0884[1:0]=0x0003 in BOTH rtl8367s_cpu_tag_enable() and rtl8367b_setup() (fixes 1522B truncation of 1526B CPU-tag+802.1Q full-MTU TCP segments that hung LuCI JS and SSH KEXINIT while preserving swconfig apply); (2) stop _New_swNic_send from clobbering CPUICR bit 29 (BUSBURST_128WORDS), linearize nonlinear TX SKBs in rtl819x_eth_xmit, set SoC MACCR CF_FCDSC=0x48, and align USEDDSC pressure/stall threshold from 256 to 400 (< SBFCR1 FCOFF=400, eliminating false PRESSURE spam and false 5s RX-STALL WEDGE resets at normal 3-unplugged-port USEDDSC=345); (3) enable _INCLUDE_PROC_FS_ on Linux 4.14 (/proc/wlan0 & /proc/wlan1), switch rtl8192cd.sh device existence checks from /proc/.../mib_all to /sys/class/net/... (fixes NO_DEVICE abort that left wlan0/wlan1 DOWN and hid RSD0614-OpenWrt-5G/2G), add SET_NETDEV_DEV, and extend 8814B TX reclaim kick; (4) wire AP-safe rtl_giwname for SIOCGIWNAME (iwconfig), populate LuCI wireless.js modes/widths/channels + empty-save guard for rtl8192cd, set vm.min_free_kbytes=2048 for 64 MiB DDR2, and add rsd0614-survey net/diag; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v562-work",
+  "volume_label": "rsd0614.work=v5.6.2",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -20,7 +20,8 @@
     "rsd0614-openwrt-v542-work",
     "rsd0614-openwrt-v550-work",
     "rsd0614-openwrt-v551-work",
-    "rsd0614-openwrt-v560-work"
+    "rsd0614-openwrt-v560-work",
+    "rsd0614-openwrt-v561-work"
   ],
   "persistent_flash": "NO-GO"
 }

@@ -26,7 +26,7 @@ def parse_elf32_le_kmod_info(data):
         if off>=len(buf):raise ValueError('ELF string offset out of bounds')
         z=buf.find(b'\x00',off)
         return buf[off:z] if z>=0 else buf[off:]
-    undef_global=set();modinfo=b'';bss_bytes=0;saw_symtab=False
+    undef_global=set();defined_global=set();modinfo=b'';bss_bytes=0;saw_symtab=False
     for sh_name,sh_type,_sh_flags,_sh_addr,sh_off,sh_size,sh_link,_sh_info,_sh_align,sh_entsize in secs:
         sname=cstr(shstr,sh_name)
         if sh_type!=8 and sh_off+sh_size>len(data):
@@ -46,14 +46,18 @@ def parse_elf32_le_kmod_info(data):
             for off in range(sh_off,sh_off+sh_size,sh_entsize):
                 st_name,_st_val,_st_sz,st_info,_st_other,st_shndx=struct.unpack_from('<IIIBBH',data,off)
                 bind=st_info>>4
-                if st_shndx==0 and st_name!=0 and bind==1:
-                    undef_global.add(cstr(strtab,st_name).decode('ascii'))
+                if st_name!=0 and bind==1:
+                    sym=cstr(strtab,st_name).decode('ascii')
+                    if st_shndx==0:
+                        undef_global.add(sym)
+                    else:
+                        defined_global.add(sym)
     if not saw_symtab:
         raise ValueError('rtl8192cd.ko missing SHT_SYMTAB section')
     modinfo_entries=[x.decode('ascii','replace') for x in modinfo.split(b'\x00') if x]
     if not any(x.startswith('license=GPL') for x in modinfo_entries):
         raise ValueError('rtl8192cd.ko missing GPL license in .modinfo')
-    return {'undef_symbols':sorted(undef_global),'modinfo':modinfo_entries,'bss_bytes':bss_bytes}
+    return {'undef_symbols':sorted(undef_global),'defined_symbols':sorted(defined_global),'modinfo':modinfo_entries,'bss_bytes':bss_bytes}
 
 def parse_system_map_ksymtab(text):
     return set(re.findall(r'^[0-9a-fA-F]+\s+[rRdD]\s+__ksymtab_(\S+)$',text,re.M))
@@ -79,14 +83,19 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'bool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);',
         'REG32(0xB8000850) = 0x579fff7fu;',
         'u32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);',
+        '(v & ~(0x7Fu << 4)) | (0x48u << 4);',
         '(v & ~(0x3Fu << 12)) | (1u << 12);',
+        'if (used > 400 && rx == stall_prev_rx)',
+        'bool pressure = runout || used > 400;',
+        'if (skb_is_nonlinear(skb) && skb_linearize(skb))',
         'if (of_machine_is_compatible("rockspace,rsd0614"))',
         'fabric_gw_rearm = 0;',
         'static int dp_heartbeat;',
         'module_param(dp_heartbeat, int, 0644);',
         'else if (beat && (dp_heartbeat || pc == 1024))',
     ):
-        if token not in ethtext:raise ValueError('RTL8197FH-VG RGMII/newdesc/heartbeat patch missing from compiled rtl819x-eth.c: '+token)
+        if token not in ethtext:raise ValueError('RTL8197FH-VG RGMII/newdesc/heartbeat/threshold patch missing from compiled rtl819x-eth.c: '+token)
+    if 'used > 256' in ethtext:raise ValueError('Stale used > 256 threshold survived in compiled rtl819x-eth.c')
     swnicsrc=linux/'drivers/net/ethernet/rtl819x/rtl819x_swnic.c'
     if not swnicsrc.is_file():raise ValueError('Missing compiled rtl819x_swnic.c: '+str(swnicsrc))
     swnictext=swnicsrc.read_text()
@@ -102,8 +111,23 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'REG32(DMA_CR4) = TX_RING0_TAIL_AWARE;',
         'New_swNic_receive_newdesc',
         'if (!new_desc_active)',
+        'REG32(CPUICR) |= TXFD;',
     ):
         if token not in swnictext:raise ValueError('RTL8197FH-VG 6-dword new-descriptor engine missing from compiled rtl819x_swnic.c: '+token)
+    if '& ~(1u << 29)' in swnictext:raise ValueError('CPUICR bit 29 (BUSBURST_128WORDS) clobber survived in compiled rtl819x_swnic.c')
+    sw8367src=linux/'drivers/net/phy/rtl8367b.c'
+    if not sw8367src.is_file():raise ValueError('Missing compiled rtl8367b.c: '+str(sw8367src))
+    sw8367text=sw8367src.read_text()
+    for token in (
+        'static int rtl8367s_set_max_len_1552(struct rtl8366_smi *smi)',
+        'rtl8366_smi_rmwr(smi, 0x1200, 0x6000, 0x6000);',
+        'rtl8366_smi_rmwr(smi, 0x0884, 0x0003, 0x0003);',
+        'rtl8366_smi_write_reg(smi, 0x088c, 0x0610);',
+        'rtl8366_smi_write_reg(smi, 0x088d, 0x0610);',
+        '(void)rtl8367s_set_max_len_1552(smi);',
+        'err = rtl8367s_set_max_len_1552(smi);',
+    ):
+        if token not in sw8367text:raise ValueError('RTL8367S 1552B max-frame fix missing from compiled rtl8367b.c: '+token)
     regssrc=linux/'drivers/net/ethernet/rtl819x/rtl819x_regs.h'
     if not regssrc.is_file():raise ValueError('Missing compiled rtl819x_regs.h: '+str(regssrc))
     regstext=regssrc.read_text()
@@ -250,11 +274,15 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     ko_info=parse_elf32_le_kmod_info(wifiko.read_bytes())
     missing_syms=sorted(set(ko_info['undef_symbols'])-ksymtab)
     if missing_syms:raise ValueError('Unresolved rtl8192cd.ko symbols missing from vmlinux __ksymtab: '+', '.join(missing_syms))
+    for req_def in ('rtl8192cd_proc_init','rtl_giwname'):
+        if req_def not in ko_info['defined_symbols']:
+            raise ValueError('Required v5.6.2 global symbol missing from compiled rtl8192cd.ko: '+req_def)
     if ko_info['bss_bytes']>1536*1024:raise ValueError(f'rtl8192cd.ko .bss too large for 64 MiB RAM: {ko_info["bss_bytes"]} bytes')
     boardsrc=wifidir/'linux6/rtl8192cd_board.c';socsrc=wifidir/'linux6/rtl8197f_soc.c';compatsrc=wifidir/'rtl8197f_linux_compat.h'
     coretxsrc=wifidir/'core/8192cd_core_tx.c';cfghsrc=wifidir/'8192cd_cfg.h';osdepsrc=wifidir/'8192cd_osdep.c'
+    comapisrc=wifidir/'8192cd_comapi.c';ioctlsrc=wifidir/'8192cd_ioctl.c'
     txdescsrc=wifidir/'WlanHAL/RTL88XX/Hal88XXTxDesc.c';halgensrc=wifidir/'WlanHAL/RTL88XX/Hal88XXGen.c'
-    for p in (boardsrc,socsrc,compatsrc,coretxsrc,cfghsrc,osdepsrc,txdescsrc,halgensrc):
+    for p in (boardsrc,socsrc,compatsrc,coretxsrc,cfghsrc,osdepsrc,comapisrc,ioctlsrc,txdescsrc,halgensrc):
         if not p.is_file():raise ValueError('Missing compiled M3 Wi-Fi source evidence: '+str(p))
     boardtext=boardsrc.read_text()
     for token in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614','mac_pton(ascii_mac, addr)','keeping fallback'):
@@ -268,26 +296,30 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     coretxtext=coretxsrc.read_text(errors='replace')
     if 'LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)' not in coretxtext:raise ValueError('sk_pacing_shift_update 4.14 guard missing from compiled 8192cd_core_tx.c')
     cfgtext=cfghsrc.read_text(errors='replace')
-    for token in ('CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600'):
-        if token not in cfgtext:raise ValueError('64 MiB memory shrink override missing from compiled 8192cd_cfg.h: '+token)
+    for token in ('CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600','(!defined(CONFIG_RTL8192CD_LINUX6_BUS) || (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)))'):
+        if token not in cfgtext:raise ValueError('64 MiB memory shrink / _INCLUDE_PROC_FS_ override missing from compiled 8192cd_cfg.h: '+token)
     osdeptext=osdepsrc.read_text(errors='replace')
-    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);'):
-        if token not in osdeptext:raise ValueError('v5.6.1 RTL8814B/WMAC hardening missing from compiled 8192cd_osdep.c: '+token)
-    if 'coherent_tx ? coherent_bd' not in txdescsrc.read_text(errors='replace'):raise ValueError('RTL8814B coherent TXBD fix missing from compiled Hal88XXTxDesc.c')
+    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);'):
+        if token not in osdeptext:raise ValueError('v5.6.2 RTL8814B/WMAC/SET_NETDEV_DEV hardening missing from compiled 8192cd_osdep.c: '+token)
+    if 'int rtl_giwname(' not in comapisrc.read_text(errors='replace'):raise ValueError('rtl_giwname WEXT SIOCGIWNAME handler missing from compiled 8192cd_comapi.c')
+    if '(iw_handler) rtl_giwname,' not in ioctlsrc.read_text(errors='replace'):raise ValueError('rtl_giwname SIOCGIWNAME wiring missing from compiled 8192cd_ioctl.c')
+    txdesctext=txdescsrc.read_text(errors='replace')
+    for token in ('coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2'):
+        if token not in txdesctext:raise ValueError('RTL8814B coherent TXBD / TX reclaim fix missing from compiled Hal88XXTxDesc.c: '+token)
     if 'Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];' not in halgensrc.read_text(errors='replace'):raise ValueError('InterruptMaskExt fix missing from compiled Hal88XXGen.c')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
     manifest=[]
-    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('rtl819x_swnic.c','drivers/net/ethernet/rtl819x/rtl819x_swnic.c'),('rtl819x_regs.h','drivers/net/ethernet/rtl819x/rtl819x_regs.h'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c'),('rtl8192cd_board.c','../rtl8192cd-rsd0614/linux6/rtl8192cd_board.c'),('rtl8197f_soc.c','../rtl8192cd-rsd0614/linux6/rtl8197f_soc.c'),('rtl8197f_linux_compat.h','../rtl8192cd-rsd0614/rtl8197f_linux_compat.h'),('8192cd_core_tx.c','../rtl8192cd-rsd0614/core/8192cd_core_tx.c'),('8192cd_cfg.h','../rtl8192cd-rsd0614/8192cd_cfg.h')]:
+    for name,rel in [('kernel.config','.config'),('System.map','System.map'),('vmlinux','vmlinux'),('vmlinux-initramfs.elf','../vmlinux-initramfs.elf'),('vmlinux-initramfs.debug','../vmlinux-initramfs.debug'),('spi-nor.c','drivers/mtd/spi-nor/spi-nor.c'),('spi-sheipa.c','drivers/spi/spi-sheipa.c'),('irq.c','arch/mips/realtek/irq.c'),('rsd0614_survey.c','arch/mips/realtek/rsd0614_survey.c'),('rtl819x-eth.c','drivers/net/ethernet/rtl819x/rtl819x-eth.c'),('rtl819x_swnic.c','drivers/net/ethernet/rtl819x/rtl819x_swnic.c'),('rtl819x_regs.h','drivers/net/ethernet/rtl819x/rtl819x_regs.h'),('rtl8367b.c','drivers/net/phy/rtl8367b.c'),('pci-realtek.c','arch/mips/pci/pci-realtek.c'),('serial_reg.h','include/uapi/linux/serial_reg.h'),('8250_dw.c','drivers/tty/serial/8250/8250_dw.c'),('rtl8192cd_board.c','../rtl8192cd-rsd0614/linux6/rtl8192cd_board.c'),('rtl8197f_soc.c','../rtl8192cd-rsd0614/linux6/rtl8197f_soc.c'),('rtl8197f_linux_compat.h','../rtl8192cd-rsd0614/rtl8197f_linux_compat.h'),('8192cd_core_tx.c','../rtl8192cd-rsd0614/core/8192cd_core_tx.c'),('8192cd_cfg.h','../rtl8192cd-rsd0614/8192cd_cfg.h')]:
         path=linux/rel
         if not path.is_file():raise ValueError('Missing build evidence: '+str(path))
         shutil.copyfile(path,dest/name)
         manifest.append({'name':name,'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
     provenance={'port_input_fingerprint':port_fingerprint,'project_commit':project_commit,'builder_image_id':builder_image_id}
-    kmod_audit={'vmlinux_ksymtab_count':len(ksymtab),'rtl8192cd_undef_symbol_count':len(ko_info['undef_symbols']),'rtl8192cd_missing_symbols':missing_syms,'rtl8192cd_bss_bytes':ko_info['bss_bytes']}
+    kmod_audit={'vmlinux_ksymtab_count':len(ksymtab),'rtl8192cd_undef_symbol_count':len(ko_info['undef_symbols']),'rtl8192cd_missing_symbols':missing_syms,'rtl8192cd_bss_bytes':ko_info['bss_bytes'],'rtl8192cd_has_proc_init':'rtl8192cd_proc_init' in ko_info['defined_symbols'],'rtl8192cd_has_giwname':'rtl_giwname' in ko_info['defined_symbols']}
     (dest/'manifest.json').write_text(json.dumps({'files':manifest,'loader_board_values':boards,'provenance':provenance,'kmod_symbol_audit':kmod_audit},indent=2)+'\n')
-    print(f"GENERATED_KERNEL_CONFIG_AND_SOURCE: PASS; rtl8192cd_undef={len(ko_info['undef_symbols'])} missing=0 bss={ko_info['bss_bytes']}B; hardware execution remains unverified")
+    print(f"GENERATED_KERNEL_CONFIG_AND_SOURCE: PASS; rtl8192cd_undef={len(ko_info['undef_symbols'])} missing=0 bss={ko_info['bss_bytes']}B proc_init=1 giwname=1; hardware execution remains unverified")
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('tree');p.add_argument('out');p.add_argument('--log',required=True);p.add_argument('--port-fingerprint',default='NOT_RECORDED');p.add_argument('--project-commit',default='NOT_AVAILABLE');p.add_argument('--builder-image-id',default='NOT_RECORDED');a=p.parse_args()

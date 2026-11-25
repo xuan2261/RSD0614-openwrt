@@ -281,6 +281,32 @@ print_wifi() {
 	dmesg | grep -Ei 'rtl8192cd|rtl8197f[-_](wlan|soc)|rtl8197g|8814|realtek-pci|pcie|wlan[01]|CfgFile|board-data|tenda-kv|calibration|rfe_type' | tail -n 80 || true
 }
 
+print_net() {
+	echo "=== NET_SYSCTL_AND_MEMORY ==="
+	grep -E '^(MemTotal|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim):' /proc/meminfo 2>/dev/null || true
+	cat /proc/sys/vm/min_free_kbytes 2>/dev/null | awk '{printf "vm.min_free_kbytes=%s\n", $0}' || true
+	echo "=== NET_BRIDGE_AND_LINKS ==="
+	brctl show 2>/dev/null || true
+	ip -4 addr show 2>/dev/null || ifconfig 2>/dev/null || true
+	ip -s link show 2>/dev/null || true
+	echo "=== NET_SWITCH0_SUMMARY ==="
+	swconfig dev switch0 show 2>/dev/null | grep -E 'VLAN|ports:|link:|pvid:' || true
+	echo "=== NET_LISTENERS ==="
+	netstat -lntup 2>/dev/null || netstat -lntu 2>/dev/null || true
+	echo "=== NET_FIREWALL_FILTER ==="
+	iptables -S 2>/dev/null | head -n 60 || true
+	echo "=== NET_WIRELESS_UBUS_SANITIZED ==="
+	if command -v ubus >/dev/null 2>&1; then
+		ubus call network.wireless status 2>/dev/null | sed -E 's/("key"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"REDACTED"/g' || true
+	fi
+	echo "=== NET_ETH_SWITCH_DMESG ==="
+	dmesg | grep -Ei 'rtl819x|8367S|switch0|br-lan|eth0|dropbear|uhttpd' | tail -n 60 || true
+	echo "=== LOGREAD_TAIL_SANITIZED ==="
+	if command -v logread >/dev/null 2>&1; then
+		logread 2>/dev/null | grep -Eiv 'passphrase|psk_key|wepkey' | tail -n 60 || true
+	fi
+}
+
 cmd="${1:-passive}"
 case "$cmd" in
 	passive|all)
@@ -305,11 +331,18 @@ case "$cmd" in
 	wifi)
 		print_wifi
 		;;
+	net)
+		print_net
+		;;
+	diag)
+		print_net
+		print_wifi
+		;;
 	backup-guide)
 		print_backup_guide
 		;;
 	*)
-		echo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|backup-guide}" >&2
+		echo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|net|diag|backup-guide}" >&2
 		exit 2
 		;;
 esac
@@ -486,7 +519,7 @@ rtl8192cd_emit_vif() {
 		return 1
 	}
 
-	[ -e "/proc/$ifname/mib_all" ] || {
+	[ -d "/sys/class/net/$ifname" ] || {
 		wireless_setup_vif_failed NO_VIF_DEVICE
 		return 1
 	}
@@ -521,7 +554,7 @@ rtl_find_phy() {
 		radio[0-9]*) fallback="wlan${devname#radio}" ;;
 	esac
 	[ -n "$want" ] || want="$fallback"
-	[ -e "/proc/$want/mib_all" ] && {
+	[ -d "/sys/class/net/$want" ] && {
 		echo "$want"
 		return 0
 	}
@@ -539,7 +572,7 @@ drv_rtl8192cd_setup() {
 	json_select ..
 
 	phy_ifname="$(rtl_find_phy "$phy" "$devname")"
-	[ -e "/proc/$phy_ifname/mib_all" ] || {
+	[ -d "/sys/class/net/$phy_ifname" ] || {
 		wireless_set_retry 0
 		wireless_setup_failed NO_DEVICE
 		return 1
@@ -623,7 +656,7 @@ drv_rtl8192cd_teardown() {
 	phy_ifname="$(rtl_find_phy "$phy" "$devname")"
 	mkdir -p "$CFGDIR"
 	lock "$LOCKFILE"
-	[ -e "/proc/$phy_ifname/mib_all" ] && $IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
+	[ -d "/sys/class/net/$phy_ifname" ] && $IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
 	rm -f "$CFGDIR/radio_${phy_ifname}.dat"
 	rtl_merge_fragments
 	lock -u "$LOCKFILE"
@@ -729,7 +762,7 @@ stop() {
 	[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
 }
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.1-m3-wifi-pcie-hardened-ramboot\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.2-m3-wifi-mtu-hardened-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)
@@ -790,7 +823,7 @@ def harden(tree,port,audit,expected=BASE):
             shutil.rmtree(old)
         else:old.rename(backup)
         stage.rename(old);mk.write_text(newmk,encoding='utf-8');cfg.write_text(newcfg,encoding='utf-8');irq.write_text(newirq,encoding='utf-8');boot.write_text(newboot,encoding='utf-8');defaultnet.write_text(newdefaultnet,encoding='utf-8');patch.parent.mkdir(parents=True,exist_ok=True);vgpatch.write_bytes(vgpatchdata);surveypatch.write_bytes(surveypatchdata);patch.write_bytes(patchdata);uartpatch.write_bytes(uartpatchdata);uartdiag.write_bytes(uartdiagdata);uartfix.write_bytes(uartfixdata)
-        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','vg_rgmii_pcie':'RTL8197FH-VG RGMII pad preservation (0x579fff7f), PITCR CF_FIX_IPG=1, P0GMIICR RX_delay=7, fabric_gw_rearm=0, PCIe0 40MHz VG MDIO 0x08=0x3101','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'stale pending cleared; PCIe0 BIT(21) enabled; NET BIT(15) armed by rtl865x_start; WMAC BIT(29) kept masked through rtl8197f_soc_probe and unmasked only after request_irq in rtl8192cd_open; BIT(15)|BIT(21)|BIT(29) in mips_chip_irqs','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'generic eth0/eth1 synthesis suppressed; RSD0614 02_network + 99-rsd0614-network + rsd0614-net + lib/netifd/wireless/rtl8192cd.sh own switch0/eth0.2/eth0.1 and wlan0/wlan1','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
+        result={'base_commit':head,'retired_target_files':existing,'retained_source_backup':str(backup),'new_target_file_allowlist':sorted(BASE_FILES),'kernel_options_disabled':list(DISABLE_KERNEL),'chip_descriptor':'BH25Q64 / 684017 / normal single-lane reads','vg_rgmii_pcie':'RTL8197FH-VG RGMII pad preservation (0x579fff7f), RTL8367S 1552B trunk max-frame (0x088c=0x0610), CPUICR BUSBURST_128WORDS preservation, USEDDSC>400 threshold, MACCR CF_FCDSC=0x48, PITCR CF_FIX_IPG=1, P0GMIICR RX_delay=7, fabric_gw_rearm=0, PCIe0 40MHz VG MDIO 0x08=0x3101','omnibus_survey':'/proc/rsd0614_hw_survey (0444) + opt-in /proc/rsd0614_probe (0600) + sanitized usr/sbin/rsd0614-survey','direct_device_irqs':'stale pending cleared; PCIe0 BIT(21) enabled; NET BIT(15) armed by rtl865x_start; WMAC BIT(29) kept masked through rtl8197f_soc_probe and unmasked only after request_irq in rtl8192cd_open; BIT(15)|BIT(21)|BIT(29) in mips_chip_irqs','startup_persistent_root':'enabled S10boot/S95done automatic mount_root paths suppressed','default_network':'generic eth0/eth1 synthesis suppressed; RSD0614 02_network + 99-rsd0614-network + rsd0614-net + lib/netifd/wireless/rtl8192cd.sh own switch0/eth0.2/eth0.1 and wlan0/wlan1','uart_register_layout':'Runtime SoC-ID dispatch via realtek,rtl819x-sysc: RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM; non-VG RTL8197F (0x8197F000) retains RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM callbacks; UPF_SHARE_IRQ|UPF_FIXED_PORT, BUSY replay and bounded IRQ diagnostics preserved','hardware_probe':'NOT YET VERIFIED','ram_boot_authorized':False}
         (audit/'latest-source-isolation.json').write_text(json.dumps(result,indent=2)+'\n');print('SOURCE_ISOLATION: PASS (source mutation only, not a firmware boot test)');print('DEVICE_VARS includes DEV_PROFILE: PASS');print('RSD0614 VG RGMII/PCIe0 patch staged: PASS; target runtime NOT YET VERIFIED');print('RSD0614 omnibus read-only hardware survey patch staged: PASS; target runtime NOT YET VERIFIED');print('BH25Q64 kernel patch staged: PASS; target probe NOT YET VERIFIED');print('RTL8197F BUSY-replay delta staged after base 0004: PASS');print('RTL8197F bounded IRQ-cause diagnostic staged: PASS');print('RTL8197F runtime SoC-ID UART dispatch staged: PASS; hardware validation NOT YET VERIFIED');return result
     finally:
         if stage.exists():shutil.rmtree(stage)

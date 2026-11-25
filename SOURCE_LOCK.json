@@ -12,10 +12,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.6.1",
+  "bundle_version": "5.6.2",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "M3 hardened RAM-only dual-band Wi-Fi + LuCI 19.07 + wired Gigabit candidate (v5.6.1-m3-wifi-pcie-hardened-ramboot): fixes every runtime issue isolated from v5.6.0 physical boot log and full-stack audit — Linux 4.14.187 sk_pacing_shift_update guard + fail-closed ELF32-LE ksymtab audit, 64 MiB DDR2 memory shrink (CONFIG_RTL_SHRINK_MEMORY_SIZE=y, 256 TX/RX rings, 2600B RX SKBs), RTL8814BR coherent TXBD/TXDESC/beacon DMA + MIPS32 shift fix, RTL8197G WMAC GIMR BIT(29) post-request_irq unmask + 0xB8000064 readback fence + InterruptMaskExt fix, read-only /dev/mtd1 cfg loader colon-MAC/fallback tolerance, synchronized PCIe0 PWRCR/PERST# reset with 3-attempt bounded retry (eliminates LTSSM 0x0c454504 race), rtl819x-eth dp_heartbeat=0 console spam silencer, hardened lib/netifd/wireless/rtl8192cd.sh (2ndchoffset/psk-mixed encmode=4/explicit MIB defaults), and LuCI wireless.js rtl8192cd WPA2/PSK encryption options; all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, all auto mount_root and MTD splitters stay suppressed, persistent flash stays NO-GO"
+  "intent": "M3 hardened RAM-only dual-band Wi-Fi + LuCI 19.07 + full-MTU wired Gigabit candidate (v5.6.2-m3-wifi-mtu-hardened-ramboot): preserves all v5.6.1 hardening (sk_pacing_shift_update guard, 64 MiB DDR2 memory shrink, RTL8814BR coherent DMA, RTL8197G GIMR BIT(29) lifecycle, read-only mtd1 cfg calibration, 3-attempt PCIe0 retry) and closes every v5.6.1 physical runtime blocker — RTL8367S 1552B max-frame programming (0x088c/0x088d=0x0610 + 0x1200/0x0884 CFG0 select in both cpu_tag_enable and setup so 1526B CPU-tag+802.1Q full-MTU LuCI/SSH TCP segments pass without truncation across swconfig apply), _New_swNic_send CPUICR bit 29 BUSBURST_128WORDS preservation + skb_linearize + MACCR CF_FCDSC=0x48 + USEDDSC>400 threshold, _INCLUDE_PROC_FS_ on Linux 4.14 + /sys/class/net rtl8192cd.sh device gate + SET_NETDEV_DEV + 8814B TX reclaim kick + AP-safe rtl_giwname (SIOCGIWNAME), LuCI wireless.js rtl8192cd modes/widths/channels + save guard, and vm.min_free_kbytes=2048; all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, persistent flash stays NO-GO"
 }

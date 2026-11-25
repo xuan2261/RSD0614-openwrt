@@ -75,6 +75,92 @@ python3 - "$OPENWRT_DIR/feeds/luci/modules/luci-mod-network/htdocs/luci-static/r
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 text = p.read_text()
+
+freq_snippet = """
+\t\t\tif (uci.get('wireless', section_id, 'type') == 'rtl8192cd') {
+\t\t\t\tvar is5g = (uci.get('wireless', section_id, 'hwmode') == '11a' ||
+\t\t\t\t            +(uci.get('wireless', section_id, 'band') || 0) >= 64 ||
+\t\t\t\t            uci.get('wireless', section_id, 'phy') == 'wlan0');
+\t\t\t\thtmodelist.HT20 = true;
+\t\t\t\thtmodelist.HT40 = true;
+\t\t\t\tif (is5g) {
+\t\t\t\t\thtmodelist.VHT20 = true;
+\t\t\t\t\thtmodelist.VHT40 = true;
+\t\t\t\t\thtmodelist.VHT80 = true;
+\t\t\t\t\tif (this.channels['11a'].length == 0) {
+\t\t\t\t\t\tthis.channels['11a'].push('auto', 'auto', true);
+\t\t\t\t\t\t[ 36, 40, 44, 48, 149, 153, 157, 161, 165 ].forEach(L.bind(function(ch) {
+\t\t\t\t\t\t\tthis.channels['11a'].push(ch, '%d (%d Mhz)'.format(ch, 5000 + ch * 5), true);
+\t\t\t\t\t\t}, this));
+\t\t\t\t\t}
+\t\t\t\t} else if (this.channels['11g'].length == 0) {
+\t\t\t\t\tthis.channels['11g'].push('auto', 'auto', true);
+\t\t\t\t\tfor (var ch = 1; ch <= 11; ch++)
+\t\t\t\t\t\tthis.channels['11g'].push(ch, '%d (%d Mhz)'.format(ch, 2407 + ch * 5), true);
+\t\t\t\t}
+\t\t\t}
+"""
+
+if "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" not in text:
+    freq_anchor = """\t\t\tvar htmodelist = L.toArray(data[0] ? data[0].getHTModes() : null)
+\t\t\t\t.reduce(function(o, v) { o[v] = true; return o }, {});
+"""
+    if text.count(freq_anchor) != 1:
+        raise SystemExit(f"Expected single htmodelist anchor in {p}, found {text.count(freq_anchor)}")
+    text = text.replace(freq_anchor, freq_anchor + freq_snippet, 1)
+
+    modes_old = """\t\t\tvar hwmodelist = L.toArray(data[0] ? data[0].getHWModes() : null)
+\t\t\t\t.reduce(function(o, v) { o[v] = true; return o }, {});
+
+\t\t\tthis.modes = [
+\t\t\t\t'', 'Legacy', true,
+\t\t\t\t'n', 'N', hwmodelist.n,
+\t\t\t\t'ac', 'AC', hwmodelist.ac
+\t\t\t];
+"""
+    modes_new = """\t\t\tvar hwmodelist = L.toArray(data[0] ? data[0].getHWModes() : null)
+\t\t\t\t.reduce(function(o, v) { o[v] = true; return o }, {});
+\t\t\tif (uci.get('wireless', section_id, 'type') == 'rtl8192cd') {
+\t\t\t\thwmodelist.n = true;
+\t\t\t\tif (uci.get('wireless', section_id, 'hwmode') == '11a' ||
+\t\t\t\t    +(uci.get('wireless', section_id, 'band') || 0) >= 64 ||
+\t\t\t\t    uci.get('wireless', section_id, 'phy') == 'wlan0')
+\t\t\t\t\thwmodelist.ac = true;
+\t\t\t}
+
+\t\t\tthis.modes = [
+\t\t\t\t'', 'Legacy', true,
+\t\t\t\t'n', 'N', hwmodelist.n,
+\t\t\t\t'ac', 'AC', hwmodelist.ac
+\t\t\t];
+"""
+    if text.count(modes_old) != 1:
+        raise SystemExit(f"Expected single hwmodelist anchor in {p}, found {text.count(modes_old)}")
+    text = text.replace(modes_old, modes_new, 1)
+
+    write_old = """\twrite: function(section_id, value) {
+\t\tuci.set('wireless', section_id, 'htmode', value[0] || null);
+\t\tuci.set('wireless', section_id, 'hwmode', value[1]);
+\t\tuci.set('wireless', section_id, 'channel', value[2]);
+\t}"""
+    write_new = """\twrite: function(section_id, value) {
+\t\tif (uci.get('wireless', section_id, 'type') == 'rtl8192cd') {
+\t\t\tif (value[0])
+\t\t\t\tuci.set('wireless', section_id, 'htmode', value[0]);
+\t\t\tif (value[1])
+\t\t\t\tuci.set('wireless', section_id, 'hwmode', value[1]);
+\t\t\tif (value[2])
+\t\t\t\tuci.set('wireless', section_id, 'channel', value[2]);
+\t\t\treturn;
+\t\t}
+\t\tuci.set('wireless', section_id, 'htmode', value[0] || null);
+\t\tuci.set('wireless', section_id, 'hwmode', value[1]);
+\t\tuci.set('wireless', section_id, 'channel', value[2]);
+\t}"""
+    if text.count(write_old) != 1:
+        raise SystemExit(f"Expected single CBIWifiFrequencyValue.write anchor in {p}, found {text.count(write_old)}")
+    text = text.replace(write_old, write_new, 1)
+
 snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
 \t\t\t\t\tcrypto_modes.push(['psk2',      'WPA2-PSK',                    35]);
 \t\t\t\t\tcrypto_modes.push(['psk-mixed', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
@@ -91,8 +177,12 @@ if "hwtype == 'rtl8192cd'" not in text:
     if text.count(anchor) != 1:
         raise SystemExit(f"Expected single broadcom crypto_modes anchor in {p}, found {text.count(anchor)}")
     text = text.replace(anchor, anchor + snippet, 1)
-    p.write_text(text)
-assert "hwtype == 'rtl8192cd'" in p.read_text()
+
+p.write_text(text)
+updated = p.read_text()
+assert "hwtype == 'rtl8192cd'" in updated
+assert "htmodelist.VHT80 = true;" in updated
+assert "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" in updated
 print("LUCI_WIRELESS_JS_RTL8192CD: PASS")
 PY
 printf '%s\n' "$fingerprint" > "$WORK_DIR/.port-fingerprint"

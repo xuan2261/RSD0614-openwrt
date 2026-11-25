@@ -208,19 +208,19 @@ index 4790ff5..7165275 100755
  
  #endif
 diff --git a/8192cd_ioctl.c b/8192cd_ioctl.c
-index 9768da7..cb32192 100755
+index 9768da7..ba13866 100755
 --- a/8192cd_ioctl.c
 +++ b/8192cd_ioctl.c
-@@ -981,6 +981,9 @@ struct iw_handler_def {
- 	struct iw_statistics*	(*get_wireless_stats)(struct net_device *dev);
- };
+@@ -1075,6 +1075,9 @@ extern int rtl_giwpower(struct net_device *dev,
+ 
+ #endif
  
 +extern int rtl_giwname(struct net_device *dev,
 +				struct iw_request_info *info,
 +				union iwreq_data *wrqu, char *extra);
- extern int rtl_siwfreq(struct net_device *dev,
- 				struct iw_request_info *info,
- 				union iwreq_data *wrqu, char *extra);
+ static const iw_handler rtl_iwhandler[] =
+ {
+ 	(iw_handler) NULL,						/* SIOCSIWCOMMIT */
 @@ -1083,7 +1086,7 @@ static const iw_handler rtl_iwhandler[] =
  	(iw_handler) rtl_wx_dummy,                              /* SIOCSIWNWID   */
  	(iw_handler) rtl_wx_dummy,                              /* SIOCGIWNWID   */

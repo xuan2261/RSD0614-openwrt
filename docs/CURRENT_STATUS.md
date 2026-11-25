@@ -87,7 +87,7 @@ Consolidates every fix uncovered by the 4-agent audit of `v5.6.3` hardware logs 
 ## Verification boundary
 
 - v5.3.9..v5.6.3 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, `1552B` `reg1200=7fcb maxLen088c=0610`), `RTL8197FH-VG` 6-dword `eth0`, `PCIe0` attempt 1/3 (`10ec:b814`), full-MTU LuCI + SSH, both 5 GHz (`RTL8814BR`) & 2.4 GHz (`RTL8197G`) APs UP & forwarding, and 5 GHz WPA2-PSK client (`780 Mbps`, DHCP, `tx_fail=0`, `26.5 MiB` free RAM) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.4 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` / `giwtxpow` audit & `deep_audit.py`: **NOT YET VERIFIED FOR v5.6.4**.
+- v5.6.4 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` / `giwtxpow` audit & `deep_audit.py`: **PASS** (CI run `#45723595834`, `6m14s`, `4,221,424` bytes / `0x004069F0`, `decoded_size=14,629,529` bytes / `13.95 MiB`, SHA-256 `a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb`, `32/32` offline policy checks PASS, `rtl8192cd.ko` `undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B`, `uhttpd_lua.so=8463B`).
 - v5.6.4 physical hardware verification (clean `VLAN 1/2`-only `switch0`, LuCI Switch + Wireless UI, `block_relay=0` STA-to-STA ping, 2.4 GHz client WPA2/DHCP, WAN port 4 NAT + software flow offloading, `iperf3`, `rsd0614-survey diag` & `flash-layout`): **NOT YET VERIFIED FOR v5.6.4**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

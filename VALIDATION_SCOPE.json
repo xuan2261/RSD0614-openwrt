@@ -17,7 +17,7 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "NOT YET VERIFIED FOR v5.6.4",
+  "openwrt_compile": "PASS (CI run 45723595834, 6m14s warm cache, 4221424 bytes / 0x004069F0, decoded_size 14629529 bytes / 13.95 MiB, SHA-256 a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb, deep_audit 32/32 PASS, rtl8192cd.ko undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B)",
   "hardware_runtime": "NOT YET VERIFIED FOR v5.6.4",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",

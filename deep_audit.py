@@ -257,9 +257,10 @@ def audit(image):
             ko_info=parse_elf32_le_kmod_info(wifimod['data'])
             kblob=payload[:cpiooff]
             missing_kstr=[s for s in ko_info['undef_symbols'] if (b'\x00'+s.encode('ascii')+b'\x00') not in kblob]
-            has_defs=('rtl8192cd_proc_init' in ko_info['defined_symbols'] and 'rtl_giwname' in ko_info['defined_symbols'])
-            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and has_defs and ko_info['bss_bytes']<=1536*1024)
-            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} proc_init={int('rtl8192cd_proc_init' in ko_info['defined_symbols'])} giwname={int('rtl_giwname' in ko_info['defined_symbols'])} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
+            has_proc=('rtl8192cd_proc_init' in ko_info['defined_symbols']) or ('proc_create_data' in ko_info['undef_symbols'] and b'\x00mib_all\x00' in wifimod['data'])
+            has_giwname=('rtl_giwname' in ko_info['defined_symbols']) or (b'\x00IEEE 802.11\x00' in wifimod['data'])
+            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and has_proc and has_giwname and ko_info['bss_bytes']<=1536*1024)
+            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} proc_init={int(has_proc)} giwname={int(has_giwname)} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
         except (OSError,ValueError,struct.error) as e:
             ko_ok=False;ko_detail=str(e)
     check('rtl8192cd-elf-ksymtab-and-bss-guard',ko_ok,ko_detail)

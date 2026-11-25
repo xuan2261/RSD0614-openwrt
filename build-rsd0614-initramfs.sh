@@ -145,8 +145,7 @@ if "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" not in text:
 \t}"""
     write_new = """\twrite: function(section_id, value) {
 \t\tif (uci.get('wireless', section_id, 'type') == 'rtl8192cd') {
-\t\t\tif (value[0])
-\t\t\t\tuci.set('wireless', section_id, 'htmode', value[0]);
+\t\t\tuci.set('wireless', section_id, 'htmode', value[0] || 'NONE');
 \t\t\tif (value[1])
 \t\t\t\tuci.set('wireless', section_id, 'hwmode', value[1]);
 \t\t\tif (value[2])
@@ -184,6 +183,18 @@ assert "hwtype == 'rtl8192cd'" in updated
 assert "htmodelist.VHT80 = true;" in updated
 assert "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" in updated
 print("LUCI_WIRELESS_JS_RTL8192CD: PASS")
+PY
+python3 - "$OPENWRT_DIR/package/network/services/dropbear/files/dropbear.init" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+if "\nSTART=98\n" not in text:
+    if text.count("\nSTART=19\n") != 1:
+        raise SystemExit(f"Expected single START=19 anchor in {p}")
+    text = text.replace("\nSTART=19\n", "\nSTART=98\n", 1)
+    p.write_text(text)
+assert "\nSTART=98\n" in p.read_text()
+print("DROPBEAR_DEFERRED_START_98: PASS")
 PY
 printf '%s\n' "$fingerprint" > "$WORK_DIR/.port-fingerprint"
 zst_decompress() {

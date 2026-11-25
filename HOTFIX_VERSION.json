@@ -1,9 +1,9 @@
 {
-  "version": "5.6.2-m3-wifi-mtu-hardened-ramboot",
-  "base": "5.6.1-m3-wifi-pcie-hardened-ramboot",
-  "change": "Consolidated hardened M3 RAM-boot build fixing every runtime failure observed on physical RSD0614 V1.0 in v5.6.1: (1) program RTL8367S (0x6367) max-frame length CFG0/CFG1 (0x088c/0x088d) = 0x0610 (1552B) and select CFG0 in 0x1200[14:13]=0x6000 & 0x0884[1:0]=0x0003 in BOTH rtl8367s_cpu_tag_enable() and rtl8367b_setup() (fixes 1522B truncation of 1526B CPU-tag+802.1Q full-MTU TCP segments that hung LuCI JS and SSH KEXINIT while preserving swconfig apply); (2) stop _New_swNic_send from clobbering CPUICR bit 29 (BUSBURST_128WORDS), linearize nonlinear TX SKBs in rtl819x_eth_xmit, set SoC MACCR CF_FCDSC=0x48, and align USEDDSC pressure/stall threshold from 256 to 400 (< SBFCR1 FCOFF=400, eliminating false PRESSURE spam and false 5s RX-STALL WEDGE resets at normal 3-unplugged-port USEDDSC=345); (3) enable _INCLUDE_PROC_FS_ on Linux 4.14 (/proc/wlan0 & /proc/wlan1), switch rtl8192cd.sh device existence checks from /proc/.../mib_all to /sys/class/net/... (fixes NO_DEVICE abort that left wlan0/wlan1 DOWN and hid RSD0614-OpenWrt-5G/2G), add SET_NETDEV_DEV, and extend 8814B TX reclaim kick; (4) wire AP-safe rtl_giwname for SIOCGIWNAME (iwconfig), populate LuCI wireless.js modes/widths/channels + empty-save guard for rtl8192cd, set vm.min_free_kbytes=2048 for 64 MiB DDR2, and add rsd0614-survey net/diag; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v562-work",
-  "volume_label": "rsd0614.work=v5.6.2",
+  "version": "5.6.3-m3-wifi-bringup-fixed-ramboot",
+  "base": "5.6.2-m3-wifi-mtu-hardened-ramboot",
+  "change": "Consolidated M3 dual-band Wi-Fi bring-up crash & runtime fix build resolving the v5.6.2 FillBeaconDesc88XX_V2 NULL dereference plus every downstream RTL8814BR (5 GHz), RTL8197G (2.4 GHz), AMSDU DMA, netifd/LuCI, and boot-delay blocker: (1) align RTL8814B 38-entry TXBD queue tables (TX_HIQ_NUM_8814B=20, HI16..HI19 in PrepareTXBD88XX_V1, InitHCIDMAReg88XX_V1, and DumpTxBDesc88XX) and check PrepareTXBDHandler return status so BCN_V2 (queue 37) never stays NULL; (2) fix MIPS32 unaligned u1Byte HIQ_En -> u2Byte HIQ_En in rtl8192cd_open, zero MAC-v4 ADDRCAM before InitMBIDCAMHandler with fixed bitmask precedence, send 5 GHz beacons at OFDM 6M (DATARATE=4) with intact TIM offset, and use wmb() for coherent KSEG1 BCN TXBD in SetBeaconDownload88XX; (3) fix coherent TX A-MSDU DMA addressing (ALIGN page base, populate desc_dma_buf_addr_amsdu[1..3], resolve through rtl8197f_wlan_tx_ring_dma via rsd0614_amsdu_txbd_dma) across BOTH RTL8814BR and RTL8197G; (4) fix RTL8197G 15-queue MappingTxQueue88XX / SendH2CPacket88XX / SetTxDescQSel88XX_V2, WPA2 CAMProgramEntry88XX_V1, SetRsvdPage88XX missing else, DownloadRsvdPage88XX wait_cnt=0, InitLLT_Table88XX_V1 polling, HIMR2/3 StopHW, and root rsnielen reset; (5) raise VG Port0/Port6 QPKTFCR to stock 0x00fc00ff for Wi-Fi<->LAN bridging bursts and hang_cnt>=25; (6) harden rtl8192cd.sh (2.4G HT40 offset, PSK/SSID validation, buffered VIF emit, dynamic band, country=US), fix LuCI Legacy htmode='NONE', and defer dropbear START=98 (eliminating 33s pre-network RSA keygen boot delay); all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v563-work",
+  "volume_label": "rsd0614.work=v5.6.3",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -21,7 +21,8 @@
     "rsd0614-openwrt-v550-work",
     "rsd0614-openwrt-v551-work",
     "rsd0614-openwrt-v560-work",
-    "rsd0614-openwrt-v561-work"
+    "rsd0614-openwrt-v561-work",
+    "rsd0614-openwrt-v562-work"
   ],
   "persistent_flash": "NO-GO"
 }

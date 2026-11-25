@@ -222,7 +222,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtw88','rtl8822be')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.2-m3-wifi-mtu-hardened-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.3-m3-wifi-bringup-fixed-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
     boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net')
     check('rsd0614-wired-network-config',
           b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
@@ -237,6 +237,7 @@ def audit(image):
     wifimod=byname.get('lib/modules/4.14.187/rtl8192cd.ko');wifiauto=byname.get('etc/modules.d/60-rtl8192cd-rsd0614',{}).get('data',b'')
     wifish=byname.get('lib/netifd/wireless/rtl8192cd.sh')
     luci_wjs=byname.get('www/luci-static/resources/view/network/wireless.js',{}).get('data',b'')
+    dropbear_init=byname.get('etc/init.d/dropbear',{}).get('data',b'')
     has_iwpriv=('usr/sbin/iwpriv' in byname) or ('sbin/iwpriv' in byname)
     check('rsd0614-m3-dualband-wifi-and-luci',
           wifimod is not None and len(wifimod['data'])>65536 and
@@ -246,9 +247,12 @@ def audit(image):
           b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and
           b'/sys/class/net/' in wifish['data'] and b'mib_all' not in wifish['data'] and
           b'HT40+|VHT40+) echo 2' in wifish['data'] and
+          b'rtl_derive_band' in wifish['data'] and b'rtl_validate_psk' in wifish['data'] and
           b'encmode=6' not in wifish['data'] and b'led_type' not in wifish['data'] and
           b'rtl8192cd' in luci_wjs and b'VHT80' in luci_wjs and
           b'RSD0614-OpenWrt-5G' in ucinet and b'RSD0614-OpenWrt-2G' in ucinet and
+          b"country='US'" in ucinet and
+          (not dropbear_init or b'START=98' in dropbear_init) and
           'usr/sbin/uhttpd' in byname and 'www/cgi-bin/luci' in byname and has_iwpriv)
     ko_ok=False;ko_detail='missing rtl8192cd.ko'
     if wifimod is not None:

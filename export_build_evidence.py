@@ -85,7 +85,10 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'u32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);',
         '(v & ~(0x7Fu << 4)) | (0x48u << 4);',
         '(v & ~(0x3Fu << 12)) | (1u << 12);',
+        'REG32(RTL819X_SWCORE_BASE + 0x457C) = 0x00fc00ffu;',
+        'REG32(RTL819X_SWCORE_BASE + 0x45C4) = 0x00fc00ffu;',
         'if (used > 400 && rx == stall_prev_rx)',
+        'if (hang_cnt >= 25)',
         'bool pressure = runout || used > 400;',
         'if (skb_is_nonlinear(skb) && skb_linearize(skb))',
         'if (of_machine_is_compatible("rockspace,rsd0614"))',
@@ -276,13 +279,15 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     if missing_syms:raise ValueError('Unresolved rtl8192cd.ko symbols missing from vmlinux __ksymtab: '+', '.join(missing_syms))
     for req_def in ('rtl8192cd_proc_init','rtl_giwname'):
         if req_def not in ko_info['defined_symbols']:
-            raise ValueError('Required v5.6.2 global symbol missing from compiled rtl8192cd.ko: '+req_def)
+            raise ValueError('Required v5.6.3 global symbol missing from compiled rtl8192cd.ko: '+req_def)
     if ko_info['bss_bytes']>1536*1024:raise ValueError(f'rtl8192cd.ko .bss too large for 64 MiB RAM: {ko_info["bss_bytes"]} bytes')
     boardsrc=wifidir/'linux6/rtl8192cd_board.c';socsrc=wifidir/'linux6/rtl8197f_soc.c';compatsrc=wifidir/'rtl8197f_linux_compat.h'
     coretxsrc=wifidir/'core/8192cd_core_tx.c';cfghsrc=wifidir/'8192cd_cfg.h';osdepsrc=wifidir/'8192cd_osdep.c'
     comapisrc=wifidir/'8192cd_comapi.c';ioctlsrc=wifidir/'8192cd_ioctl.c'
     txdescsrc=wifidir/'WlanHAL/RTL88XX/Hal88XXTxDesc.c';halgensrc=wifidir/'WlanHAL/RTL88XX/Hal88XXGen.c'
-    for p in (boardsrc,socsrc,compatsrc,coretxsrc,cfghsrc,osdepsrc,comapisrc,ioctlsrc,txdescsrc,halgensrc):
+    h8814bcfg=wifidir/'WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h';h8197ggen=wifidir/'WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c'
+    halfwsrc=wifidir/'WlanHAL/RTL88XX/Hal88XXFirmware.c'
+    for p in (boardsrc,socsrc,compatsrc,coretxsrc,cfghsrc,osdepsrc,comapisrc,ioctlsrc,txdescsrc,halgensrc,h8814bcfg,h8197ggen,halfwsrc):
         if not p.is_file():raise ValueError('Missing compiled M3 Wi-Fi source evidence: '+str(p))
     boardtext=boardsrc.read_text()
     for token in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614','mac_pton(ascii_mac, addr)','keeping fallback'):
@@ -299,14 +304,23 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     for token in ('CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600','(!defined(CONFIG_RTL8192CD_LINUX6_BUS) || (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)))'):
         if token not in cfgtext:raise ValueError('64 MiB memory shrink / _INCLUDE_PROC_FS_ override missing from compiled 8192cd_cfg.h: '+token)
     osdeptext=osdepsrc.read_text(errors='replace')
-    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);'):
-        if token not in osdeptext:raise ValueError('v5.6.2 RTL8814B/WMAC/SET_NETDEV_DEV hardening missing from compiled 8192cd_osdep.c: '+token)
+    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;'):
+        if token not in osdeptext:raise ValueError('v5.6.3 RTL8814B/WMAC/SET_NETDEV_DEV/HIQ_En hardening missing from compiled 8192cd_osdep.c: '+token)
     if 'int rtl_giwname(' not in comapisrc.read_text(errors='replace'):raise ValueError('rtl_giwname WEXT SIOCGIWNAME handler missing from compiled 8192cd_comapi.c')
     if '(iw_handler) rtl_giwname,' not in ioctlsrc.read_text(errors='replace'):raise ValueError('rtl_giwname SIOCGIWNAME wiring missing from compiled 8192cd_ioctl.c')
+    if '#define TX_HIQ_NUM_8814B                20' not in h8814bcfg.read_text(errors='replace'):
+        raise ValueError('RTL8814B 20-HIQ alignment missing from compiled Hal8814BCfg.h')
     txdesctext=txdescsrc.read_text(errors='replace')
-    for token in ('coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2'):
-        if token not in txdesctext:raise ValueError('RTL8814B coherent TXBD / TX reclaim fix missing from compiled Hal88XXTxDesc.c: '+token)
-    if 'Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];' not in halgensrc.read_text(errors='replace'):raise ValueError('InterruptMaskExt fix missing from compiled Hal88XXGen.c')
+    for token in ('coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2','REG_HI16Q_TXBD_DESA_L','rsd0614_amsdu_txbd_dma','IE0_SET_TX_DESC_DATARATE(IE0_head, 4)','alloc_desc_bcn_addr'):
+        if token not in txdesctext:raise ValueError('v5.6.3 RTL8814B/8197G TXBD/AMSDU/BCN fix missing from compiled Hal88XXTxDesc.c: '+token)
+    halgentext=halgensrc.read_text(errors='replace')
+    for token in ('Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];','REG_P0HI16Q_HI17Q_TXBD_NUM','HCI_TX_DMA_QUEUE_CMD_V2','tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;'):
+        if token not in halgentext:raise ValueError('v5.6.3 Hal88XXGen TXBD/LLT/IMR fix missing from compiled Hal88XXGen.c: '+token)
+    h8197gtext=h8197ggen.read_text(errors='replace')
+    for token in ('MappingTxQueue88XX;','CAMProgramEntry88XX_V1;'):
+        if token not in h8197gtext:raise ValueError('v5.6.3 RTL8197G 15-queue / WPA2 CAM v1 fix missing from compiled Hal8197GGen.c: '+token)
+    if 'wait_cnt = 0;' not in halfwsrc.read_text(errors='replace'):
+        raise ValueError('v5.6.3 DownloadRsvdPage88XX wait_cnt reset missing from compiled Hal88XXFirmware.c')
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))

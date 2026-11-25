@@ -197,7 +197,7 @@ index 3326987..d3d4c1d 100644
  	}
  
 diff --git a/drivers/net/ethernet/rtl819x/rtl819x-eth.c b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
-index 1035361..840903c 100644
+index 1035361..6360db2 100644
 --- a/drivers/net/ethernet/rtl819x/rtl819x-eth.c
 +++ b/drivers/net/ethernet/rtl819x/rtl819x-eth.c
 @@ -440,6 +440,16 @@ static int trunk_pause = 2;
@@ -242,7 +242,7 @@ index 1035361..840903c 100644
  
  	/*
  	 * M6.6 KNOWN-OPEN (A-2): sustained max-rate ROUTED bulk (~700 Mbit/s iperf3
-@@ -680,35 +696,45 @@ static void rtl865x_start(void)
+@@ -680,35 +696,53 @@ static void rtl865x_start(void)
  		 * in exactly this test, which is why every step below is loader-exact. */
  		{
  			u32 v;
@@ -281,6 +281,14 @@ index 1035361..840903c 100644
 +				v = REG32(RTL819X_SWCORE_BASE + 0x4100);
 +				REG32(RTL819X_SWCORE_BASE + 0x4100) =
 +					(v & ~(0x3Fu << 12)) | (1u << 12);
++				/* Stock RSD0614 rtl865x_adjustQueueLen: raise Port 0 (RGMII) & Port 6 (CPU)
++				 * queue packet-count FC thresholds (FCOFF=252, FCON=255) for Wi-Fi<->LAN bursts. */
++				REG32(RTL819X_SWCORE_BASE + 0x457C) = 0x00fc00ffu;
++				REG32(RTL819X_SWCORE_BASE + 0x4580) = 0x00fc00ffu;
++				REG32(RTL819X_SWCORE_BASE + 0x4584) = 0x00fc00ffu;
++				REG32(RTL819X_SWCORE_BASE + 0x45C4) = 0x00fc00ffu;
++				REG32(RTL819X_SWCORE_BASE + 0x45C8) = 0x00fc00ffu;
++				REG32(RTL819X_SWCORE_BASE + 0x45CC) = 0x00fc00ffu;
 +			}
  			/* 4. P0GMIICR: GMAC=RGMII (bits[24:23]=0), loader fields
 -			 * bits[17:16]=3 + bits[15:8]=0x7d, delays TX(bit4)+RX=5.
@@ -306,7 +314,7 @@ index 1035361..840903c 100644
  			v |= (3u << 25) | (3u << 18);	/* CFG_CPUC_TAG|CFG_TX_CPUC_TAG, CF_SEL_RGTXC */
  			REG32(RTL819X_SWCORE_BASE + 0x414C) = v;
  			/* 5. PITCR port0 = RGMII (default UTP!) */
-@@ -786,11 +812,13 @@ static void rtl865x_start(void)
+@@ -786,11 +820,13 @@ static void rtl865x_start(void)
  			if (rtl8367s_trunk_pause_set(trunk_pause == 1) < 0)
  				pr_err("rtl819x trunk-pause: 8367S SMI not probed — SoC side only (re-apply: eth0 down/up)\n");
  		}
@@ -322,7 +330,7 @@ index 1035361..840903c 100644
  
  		REG32(MSCR) |= MSCR_EN_L2;		/* global L2 forwarding enable (LAST) */
  	}
-@@ -798,9 +826,11 @@ static void rtl865x_start(void)
+@@ -798,9 +834,11 @@ static void rtl865x_start(void)
  	/* Bring-up self-diagnosis (readable over ssh via `dmesg`): on a dead-RX
  	 * boot the ring base still latches into CPURPDCR0 but CPUIISR never accrues
  	 * RX_DONE — that distinguishes an engine wedge from a fabric-silent path. */
@@ -337,7 +345,7 @@ index 1035361..840903c 100644
  
  	/* M7: latch the known-good fabric config ONCE, at the end of the first
  	 * successful bring-up (loader groundwork + this function's programming,
-@@ -826,7 +856,7 @@ static irqreturn_t rtl819x_eth_isr(int irq, void *dev_id)
+@@ -826,7 +864,7 @@ static irqreturn_t rtl819x_eth_isr(int irq, void *dev_id)
  	u32 status;
  
  	status = readl(priv->base + R_CPUIISR);
@@ -346,7 +354,7 @@ index 1035361..840903c 100644
  
  	/*
  	 * Mask at BOTH the CPU-iface (CPUIIMR) AND the global controller
-@@ -1146,7 +1176,7 @@ static void rtl819x_hang_check(struct rtl819x_eth_priv *priv)
+@@ -1146,7 +1184,7 @@ static void rtl819x_hang_check(struct rtl819x_eth_priv *priv)
  
  			stall_win = 0;
  
@@ -355,7 +363,16 @@ index 1035361..840903c 100644
  				stall_hits++;
  			else
  				stall_hits = 0;
-@@ -1273,7 +1303,10 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1193,7 +1231,7 @@ static void rtl819x_hang_check(struct rtl819x_eth_priv *priv)
+ 	hang_last_rx = rxd;
+ 	hang_last_tx = txd;
+ 
+-	if (hang_cnt >= 3) {			/* ~3s: RX frozen while TX active */
++	if (hang_cnt >= 25) {			/* ~3s at 12ms tick (10 ticks = 120ms): RX frozen while TX active */
+ 		hang_cnt = 0;
+ 		/*
+ 		 * M6.6: this "RXptr frozen + TXptr moving" gate false-positives in the
+@@ -1273,7 +1311,10 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  				skb = skb_vlan_untag(skb);	/* -> hwaccel tag = real vid */
  				if (!skb) { dev->stats.rx_dropped++; continue; }
  			} else {
@@ -367,7 +384,7 @@ index 1035361..840903c 100644
  			}
  		}
  		napi_gro_receive(napi, skb);
-@@ -1284,11 +1317,17 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1284,11 +1325,17 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  	}
  
  	/* M6.3: NAPI complete -> re-arm the switch NIC IRQ the ISR masked (CPUIIMR
@@ -387,7 +404,7 @@ index 1035361..840903c 100644
  		REG32(GIMR) |= BSP_SW_IE;
  		set_c0_status(STATUSF_IP4);
  		/*
-@@ -1311,7 +1350,7 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1311,7 +1358,7 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  		u32 gd = REG32(GDSR0);
  		unsigned int used = (gd & GDSR0_USEDDSC_MASK) >> 16;
  		bool runout = !!(gd & GDSR0_DSCRUNOUT);
@@ -396,7 +413,7 @@ index 1035361..840903c 100644
  		bool beat;
  
  		/* ★ Increment UNCONDITIONALLY. This used to sit in the third operand
-@@ -1338,7 +1377,7 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
+@@ -1338,7 +1385,7 @@ static int rtl819x_eth_poll(struct napi_struct *napi, int budget)
  			pr_err_ratelimited("rtl819x DP: PRESSURE poll#%lu rx_done=%d rx_pkts=%lu CPUIISR=%08x USEDDSC=%u runout=%d\n",
  					   pc, rx_done, dev->stats.rx_packets,
  					   REG32(CPUIISR), used, runout);
@@ -405,7 +422,7 @@ index 1035361..840903c 100644
  			pr_err("rtl819x DP: poll#%lu rx_done=%d rx_pkts=%lu CPUIISR=%08x USEDDSC=%u runout=%d\n",
  			       pc, rx_done, dev->stats.rx_packets, REG32(CPUIISR),
  			       used, runout);
-@@ -1351,7 +1390,14 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1351,7 +1398,14 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  {
  	rtl_nicTx_info nicTx;
  	dma_addr_t dma;
@@ -421,7 +438,7 @@ index 1035361..840903c 100644
  
  	pr_err_once("rtl819x DP: first TX (len=%u)\n", len);
  
-@@ -1364,19 +1410,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1364,19 +1418,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  
  	memset(&nicTx, 0, sizeof(nicTx));
  	nicTx.txIdx = 0;
@@ -441,7 +458,7 @@ index 1035361..840903c 100644
  	/*
  	 * VID from the netdev's hwaccel VLAN tag — eth0.2 (LAN) -> VID 2,
  	 * eth0.1 (WAN) -> VID 1 (the M6.6 Fork A VLAN plan); an untagged frame
-@@ -1395,6 +1428,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1395,6 +1436,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  		nicTx.vid = skb_vlan_tag_get(skb) & 0xfff;
  	else
  		nicTx.vid = 2;
@@ -453,7 +470,7 @@ index 1035361..840903c 100644
  	nicTx.flags = 0;	/* direct-TX: swnic adds PKTHDR_USED_8197F|PKT_OUTGOING */
  
  	if (New_swNic_send(skb, (void *)(uintptr_t)dma, len, &nicTx) != 0) {
-@@ -1554,6 +1592,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
+@@ -1554,6 +1600,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
  	else
  		eth_hw_addr_random(dev);
  

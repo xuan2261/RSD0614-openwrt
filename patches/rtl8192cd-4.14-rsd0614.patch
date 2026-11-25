@@ -207,6 +207,20 @@ index 4790ff5..7165275 100755
  }
  
  #endif
+diff --git a/8192cd_hw.c b/8192cd_hw.c
+index cae2491..d9adc34 100755
+--- a/8192cd_hw.c
++++ b/8192cd_hw.c
+@@ -19612,6 +19612,9 @@ int rtl8192cd_init_hw_PCI(struct rtl8192cd_priv *priv)
+ #endif
+ #if defined(CONFIG_WLAN_HAL_8192FE)
+ 			&& (GET_CHIP_VER(priv) != VERSION_8192F)
++#endif
++#if defined(CONFIG_WLAN_HAL_8197G)
++			&& (GET_CHIP_VER(priv) != VERSION_8197G)
+ #endif
+ 		)
+ 		{
 diff --git a/8192cd_ioctl.c b/8192cd_ioctl.c
 index 9768da7..ba13866 100755
 --- a/8192cd_ioctl.c
@@ -252,10 +266,35 @@ index 9768da7..ba13866 100755
  	{
  		priv->pshare->wlangeneral_pid= -1;
 diff --git a/8192cd_osdep.c b/8192cd_osdep.c
-index 90c8937..effa8cf 100755
+index 90c8937..efc4f77 100755
 --- a/8192cd_osdep.c
 +++ b/8192cd_osdep.c
-@@ -10169,6 +10169,8 @@ priv->pshare->curr_band =0; //init curr_band value
+@@ -4870,7 +4870,10 @@ static int rtl8192cd_init_sw(struct rtl8192cd_priv *priv)
+ 				panic_printk("PrepareRXBDHandler fail\n");
+ 				return 1;
+ 			}
+-	        GET_HAL_INTERFACE(priv)->PrepareTXBDHandler(priv);
++	        if (GET_HAL_INTERFACE(priv)->PrepareTXBDHandler(priv) == RT_STATUS_FAILURE) {
++				panic_printk("PrepareTXBDHandler fail\n");
++				return 1;
++			}
+ 
+             //Filen, init SW TXDESC Type
+             //To avoid recycle error
+@@ -6243,10 +6246,8 @@ static int rtl8192cd_init_sw(struct rtl8192cd_priv *priv)
+ #endif
+ 	} else {
+ #if !defined(RTK_NL80211) /*make OpenWrt support VAP+RADIUS*/
+-#ifdef MBSSID
+-		if(IS_VAP_INTERFACE(priv) && (!priv->pmib->dot11OperationEntry.keep_rsnie))
+-			priv->pmib->dot11RsnIE.rsnielen = 0;	/* reset RSN IE length */
+-#endif		
++		if (!priv->pmib->dot11OperationEntry.keep_rsnie)
++			priv->pmib->dot11RsnIE.rsnielen = 0;	/* reset RSN IE length on root & VAP */
+ #endif
+ #ifdef SUPPORT_TX_AMSDU
+ 		if ((priv->pmib->dot118021xAuthEntry.dot118021xAlgrthm)
+@@ -10169,6 +10170,8 @@ priv->pshare->curr_band =0; //init curr_band value
      if(GET_CHIP_VER(priv)==VERSION_8197G) {
          //TODO
          REG32(0xB8000064)|= 0x1F;
@@ -264,7 +303,7 @@ index 90c8937..effa8cf 100755
      }
  #endif //CONFIG_WLAN_HAL_8197G
  
-@@ -10732,6 +10734,14 @@ priv->pshare->curr_band =0; //init curr_band value
+@@ -10732,6 +10735,14 @@ priv->pshare->curr_band =0; //init curr_band value
  				}
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  				priv->pshare->linux6_irq_requested = true;
@@ -279,7 +318,7 @@ index 90c8937..effa8cf 100755
  #endif
  				if (IS_ROOT_INTERFACE(priv))
  					rtl8197f_wlan_phase_set(221, "irq-ready", 0);
-@@ -10916,8 +10926,8 @@ do_hw_init:
+@@ -10916,8 +10927,8 @@ do_hw_init:
  
  		if (rc && ++init_hw_cnt < 5) {
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
@@ -290,7 +329,16 @@ index 90c8937..effa8cf 100755
  				unsigned int gate_retry = REG32(0xB8000064);
  				REG32(0xB8000064) = gate_retry & ~0x1fU;
  				(void)REG32(0xB8000064);
-@@ -10960,7 +10970,7 @@ do_hw_init:
+@@ -10927,6 +10938,8 @@ do_hw_init:
+ 				(void)REG32(0xB8000064);
+ 				mdelay(1);
+ 				priv->pshare->linux6_soc_wlan_gate = REG32(0xB8000064);
++				GET_HAL_INTERFACE(priv)->PrepareRXBDHandler(priv, RX_BUF_LEN, init_rxdesc_88XX);
++				GET_HAL_INTERFACE(priv)->PrepareTXBDHandler(priv);
+ 				rtl8197f_wlan_phase_set(238, "hardware-init-retry-gate-pulse", -EAGAIN);
+ 			}
+ #endif
+@@ -10960,7 +10973,7 @@ do_hw_init:
  			}
  #endif //CONFIG_RTL_92D_SUPPORT
  			force_stop_wlan_hw();
@@ -299,7 +347,78 @@ index 90c8937..effa8cf 100755
  #ifdef CONFIG_RTL_92D_SUPPORT
  			if (GET_CHIP_VER(priv)!=VERSION_8192D)	/* do not trigger wtdog if 92D open fail */
  #endif
-@@ -12119,6 +12129,13 @@ free_res:
+@@ -11019,6 +11032,24 @@ do_hw_init:
+ 	rtw_netlink_hook(priv, priv->pshare->curr_band, priv->if_id);
+ #endif
+ 
++#if defined(MBSSID) || defined(MULTI_MAC_CLONE) || defined(VXD_DIFF_MAC)
++	if (IS_ROOT_INTERFACE(priv)) {
++		// clear ADDRCAM before installing root entry 0
++#if IS_RTL88XX_MAC_V4
++		if (_GET_HAL_DATA(priv)->MacVersion.is_MAC_v4) {
++			unsigned int write_cmd;
++			for (i = 0; i < 16; i++) {
++				for (j = 0; j < 8; j++) {
++					write_cmd = BIT_MASK_ADDRCAM_RANGE | BIT_ADDRCAM_POLL | BIT__ADDRCAM_WT_EN | BIT__ADDRCAM_ADDR(i*8+j);
++					RTL_W32(REG_ADDRCAM_WRITE_CONTENT, 0);
++					RTL_W32(REG_ADDRCAM_CFG, write_cmd);
++				}
++			}
++		}
++#endif
++	}
++#endif
++
+ //8814B ADDRCAM Init for each interface
+ #ifdef ADDRESS_CAM
+     if (IS_SUPPORT_ADDR_CAM(priv)){
+@@ -11036,25 +11067,8 @@ do_hw_init:
+ #if defined(MBSSID) || defined(MULTI_MAC_CLONE) || defined(VXD_DIFF_MAC)
+ 	if (IS_ROOT_INTERFACE(priv)) {
+ 		// clear the rest area of CAM
+-#if IS_RTL88XX_MAC_V4
+-		unsigned int write_cmd;
+-#endif
+ 		unsigned int camData[2];
+ 		camData[1] = 0;
+-
+-#if IS_RTL88XX_MAC_V4
+-        if (_GET_HAL_DATA(priv)->MacVersion.is_MAC_v4) {
+-            for (i = 0; i < 16; i++) {
+-                //each cam entry 32 bytes, need to fill 8 times
+-        		camData[0] = 0;
+-                for (j = 0; j < 8; j++) {
+-            		write_cmd = (RTL_R32(REG_ADDRCAM_CFG) | BIT_MASK_ADDRCAM_RANGE | BIT_ADDRCAM_POLL | BIT__ADDRCAM_WT_EN & ~BIT_MASK__ADDRCAM_ADDR) | BIT__ADDRCAM_ADDR(i*8+j);
+-                    RTL_W32(REG_ADDRCAM_WRITE_CONTENT, camData[0]); //fill 0
+-                    RTL_W32(REG_ADDRCAM_CFG, write_cmd);
+-                }
+-            }
+-        }
+-#endif
+ #if IS_RTL88XX_MAC_V1_V2_V3
+         if (_GET_HAL_DATA(priv)->MacVersion.is_MAC_v1_v2_v3) {
+ 			for (i = 0; i < 8; i++) {
+@@ -11121,14 +11135,17 @@ do_hw_init:
+ 		if (IS_HAL_CHIP(priv)){
+ #if defined(CONFIG_PCI_HCI)			
+ 			if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+-		        u1Byte HIQ_En=0;
++		        u2Byte HIQ_En = 0;
+ 		        GET_HAL_INTERFACE(priv)->GetHwRegHandler(priv, HW_VAR_HIQ_NO_LMT_EN, (pu1Byte)&HIQ_En);
+ 		        HIQ_En = HIQ_En | BIT0;
+ 		        GET_HAL_INTERFACE(priv)->SetHwRegHandler(priv, HW_VAR_HIQ_NO_LMT_EN, (pu1Byte)&HIQ_En);
+ 			}
+ #endif			
+ #ifdef MULTI_MAC_CLONE
+-			GET_HAL_INTERFACE(priv)->InitMBIDCAMHandler(priv);
++#ifdef ADDRESS_CAM
++			if (!IS_SUPPORT_ADDR_CAM(priv))
++#endif
++				GET_HAL_INTERFACE(priv)->InitMBIDCAMHandler(priv);
+ 			//default add into mbssid cam, vxd or vap as client mode will enable BIT 24 if macclone or vap is enabled.
+ #endif
+ 		}
+@@ -12119,6 +12136,13 @@ free_res:
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  	if (priv && IS_ROOT_INTERFACE(priv) && priv->pshare->linux_dev) {
  		if (priv->pshare->linux6_irq_requested) {
@@ -313,7 +432,7 @@ index 90c8937..effa8cf 100755
  			free_irq(dev->irq, dev);
  			priv->pshare->linux6_irq_requested = false;
  		}
-@@ -13100,6 +13117,13 @@ int rtl8192cd_close(struct net_device *dev)
+@@ -13100,6 +13124,13 @@ int rtl8192cd_close(struct net_device *dev)
  #endif
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  				if (priv->pshare->linux6_irq_requested) {
@@ -327,7 +446,7 @@ index 90c8937..effa8cf 100755
  					free_irq(dev->irq, dev);
  					priv->pshare->linux6_irq_requested = false;
  				}
-@@ -13222,8 +13246,17 @@ int rtl8192cd_close(struct net_device *dev)
+@@ -13222,8 +13253,17 @@ int rtl8192cd_close(struct net_device *dev)
  
  #ifdef CONFIG_WLAN_HAL_8197G
  	if (IS_ROOT_INTERFACE(priv) && (GET_CHIP_VER(priv)==VERSION_8197G)) {
@@ -346,7 +465,7 @@ index 90c8937..effa8cf 100755
  	}
  #endif //CONFIG_WLAN_HAL_8197G
  
-@@ -14496,7 +14529,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
+@@ -14496,7 +14536,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -355,7 +474,7 @@ index 90c8937..effa8cf 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14524,7 +14557,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
+@@ -14524,7 +14564,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -364,7 +483,7 @@ index 90c8937..effa8cf 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14546,7 +14579,7 @@ static const struct net_device_ops mesh_netdev_ops = {
+@@ -14546,7 +14586,7 @@ static const struct net_device_ops mesh_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -373,7 +492,54 @@ index 90c8937..effa8cf 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = mesh_start_xmit,
-@@ -15470,7 +15503,8 @@ int InitWlanBuffer88XX_V1(struct rtl8192cd_priv *priv)
+@@ -14961,14 +15001,38 @@ int rtl8197f_wlan_tx_ring_dma(struct rtl8192cd_priv *priv, const void *entry,
+ 			    size_t length, dma_addr_t *address)
+ {
+ 	HAL_DATA_TYPE *hal = _GET_HAL_DATA(priv);
+-	const unsigned char *bases[] = { hal->desc_txbd_dma_buf,
+-		hal->desc_txdesc_dma_buf, hal->desc_bcn_dma_buf };
+-	size_t sizes[] = { hal->desc_dma_txbd_buf_len,
+-		hal->desc_dma_txdesc_buf_len, hal->desc_dma_bcn_buf_len };
+-	dma_addr_t dma[] = { hal->desc_txbd_dma_addr,
+-		hal->desc_txdesc_dma_addr, hal->desc_bcn_dma_addr };
+-	const void *allocations[] = { hal->alloc_desc_txbd_addr,
+-		hal->alloc_desc_txdesc_addr, hal->alloc_desc_bcn_addr };
++	const unsigned char *bases[] = {
++		hal->desc_txbd_dma_buf,
++		hal->desc_txdesc_dma_buf,
++		hal->desc_bcn_dma_buf,
++#ifdef WLAN_HAL_TX_AMSDU
++		(const unsigned char *)(unsigned long)hal->desc_dma_buf_virt_amsdu,
++#endif
++	};
++	size_t sizes[] = {
++		hal->desc_dma_txbd_buf_len,
++		hal->desc_dma_txdesc_buf_len,
++		hal->desc_dma_bcn_buf_len,
++#ifdef WLAN_HAL_TX_AMSDU
++		hal->desc_dma_buf_len_amsdu,
++#endif
++	};
++	dma_addr_t dma[] = {
++		hal->desc_txbd_dma_addr,
++		hal->desc_txdesc_dma_addr,
++		hal->desc_bcn_dma_addr,
++#ifdef WLAN_HAL_TX_AMSDU
++		hal->desc_dma_buf_addr_amsdu[0],
++#endif
++	};
++	const void *allocations[] = {
++		hal->alloc_desc_txbd_addr,
++		hal->alloc_desc_txdesc_addr,
++		hal->alloc_desc_bcn_addr,
++#ifdef WLAN_HAL_TX_AMSDU
++		(const void *)(unsigned long)hal->desc_dma_buf_virt_amsdu,
++#endif
++	};
+ 	unsigned int i;
+ 
+ 	if (!entry || !address || !length)
+@@ -15470,7 +15534,8 @@ int InitWlanBuffer88XX_V1(struct rtl8192cd_priv *priv)
  			  GET_CHIP_VER(priv) == VERSION_8197G) &&
  			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_EMBEDDED))) ||
  			((GET_CHIP_VER(priv) == VERSION_8822B ||
@@ -383,7 +549,7 @@ index 90c8937..effa8cf 100755
  			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_PCI_DIRECT)));
  		_GET_HAL_DATA(priv)->alloc_desc_txbd_addr = NULL;
  		_GET_HAL_DATA(priv)->alloc_desc_txbd_buf_size = 0;
-@@ -16781,9 +16815,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
+@@ -16781,9 +16846,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
  			priv->pshare->linux6_radio_index = wdev->radio_index;
  			priv->pshare->linux6_root_priv = priv;
  			skb_queue_head_init(&priv->pshare->linux6_rx_delivery);
@@ -395,7 +561,7 @@ index 90c8937..effa8cf 100755
  			rtl8197f_wlan_phase_set(716, "probe-napi-add-entry", 0);
  			netif_napi_add_weight(dev, &priv->pshare->linux6_rx_napi,
  					rtl8192cd_linux6_napi_poll, 64);
-@@ -17855,6 +17891,8 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+@@ -17855,6 +17922,8 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
                  priv->pshare->version_id = VERSION_8197G;
                  DEBUG_INFO("\n found 8197G !!! \n");
                  REG32(0xB8000064)|= 0x1F;
@@ -404,7 +570,7 @@ index 90c8937..effa8cf 100755
                  //TODO
              }
  #endif // #if defined(CONFIG_WLAN_HAL_8197F) 
-@@ -18146,6 +18184,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+@@ -18146,6 +18215,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
  	}
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  linux6_irq_ready:
@@ -412,7 +578,7 @@ index 90c8937..effa8cf 100755
  #endif
  
  #ifdef CONFIG_PUMA_UDMA_SUPPORT
-@@ -18350,8 +18389,13 @@ register_driver:
+@@ -18350,8 +18420,13 @@ register_driver:
  		rtl8197f_wlan_phase_set(130, "netdev-register", 0);
  	rc = osk_register_netdev(dev);
  #else
@@ -427,7 +593,7 @@ index 90c8937..effa8cf 100755
  	rc = register_netdev(dev);
  #endif
  
-@@ -20452,7 +20496,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
+@@ -20452,7 +20527,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
          .ndo_stop               = rtl8192cd_close,
          .ndo_set_mac_address    = rtl_pseudo_dev_set_hwaddr,
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -436,7 +602,7 @@ index 90c8937..effa8cf 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -20530,7 +20574,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
+@@ -20530,7 +20605,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -445,7 +611,7 @@ index 90c8937..effa8cf 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -22818,7 +22862,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
+@@ -22818,7 +22893,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_vdev_get_stats,
@@ -526,10 +692,92 @@ index c290316..8e5bec8 100755
  
  $(obj)/data_%.c: $(src)/$(RTL_WLAN_DATA_DIR)/%.txt
  	rm -f $(obj)/TXPWR_92C.h
+diff --git a/WlanHAL/RTL88XX/Hal88XXFirmware.c b/WlanHAL/RTL88XX/Hal88XXFirmware.c
+index 1be6a9b..8ef17ed 100755
+--- a/WlanHAL/RTL88XX/Hal88XXFirmware.c
++++ b/WlanHAL/RTL88XX/Hal88XXFirmware.c
+@@ -2950,11 +2950,11 @@ SetRsvdPage88XX
+ 	    else
+ #endif 
+ #if IS_RTL8814A_SERIES || IS_RTL8881A_SERIES || IS_RTL8192E_SERIES || IS_RTL8197F_SERIES || IS_RTL8198F_SERIES
+-if(IS_HARDWARE_TYPE_8814A(Adapter) || IS_HARDWARE_TYPE_8881A(Adapter) || IS_HARDWARE_TYPE_8192E(Adapter) || IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8198F(Adapter))	       
+- txdesc_size = SIZE_TXDESC_88XX;
++    if (IS_HARDWARE_TYPE_8814A(Adapter) || IS_HARDWARE_TYPE_8881A(Adapter) || IS_HARDWARE_TYPE_8192E(Adapter) || IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8198F(Adapter))
++        txdesc_size = SIZE_TXDESC_88XX;
++    else
+ #endif
+-	       
+-	        txdesc_size = SIZE_TXDESC_88XX;
++        txdesc_size = SIZE_TXDESC_88XX;
+ 
+ 	    GET_HAL_INTERFACE(Adapter)->FillBeaconDescHandler(Adapter, prsp-txdesc_size, (void*)prsp, pktLen, 1);
+ 	    //FillBeaconDesc88XX(Adapter, prsp-SIZE_TXDESC_88XX, (void*)prsp, pktLen, 1);
+@@ -3536,15 +3536,15 @@ u8 SendH2CPacket88XX(
+     PH2C_PAYLOAD_88XX   h2c_buf_start = (PH2C_PAYLOAD_88XX)_GET_HAL_DATA(Adapter)->h2c_buf;
+     ptx_dma     = (PHCI_TX_DMA_MANAGER_88XX)(_GET_HAL_DATA(Adapter)->PTxDMA88XX);
+    
+-#if (IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE)
+-    if(IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8822C(Adapter)|| IS_HARDWARE_TYPE_8812FE(Adapter)) {    
+-        DMA_QUEUE_CMD = HCI_TX_DMA_QUEUE_CMD;  
++#if (IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE || IS_EXIST_RTL8197GEM)
++    if (IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8822C(Adapter) || IS_HARDWARE_TYPE_8812FE(Adapter) || IS_HARDWARE_TYPE_8197G(Adapter)) {
++        DMA_QUEUE_CMD = HCI_TX_DMA_QUEUE_CMD;
+     }
+-#endif  //(IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE)
++#endif
+ 
+-#if IS_EXIST_RTL8198FEM || IS_EXIST_RTL8197GEM
+-    if ( IS_HARDWARE_TYPE_8198F(Adapter) || IS_HARDWARE_TYPE_8197G(Adapter)) {
+-        DMA_QUEUE_CMD = HCI_TX_DMA_QUEUE_CMD_V1; 
++#if IS_EXIST_RTL8198FEM
++    if (IS_HARDWARE_TYPE_8198F(Adapter)) {
++        DMA_QUEUE_CMD = HCI_TX_DMA_QUEUE_CMD_V1;
+     }
+ #endif  //IS_EXIST_RTL8198FEM
+ 
+@@ -4722,6 +4722,7 @@ DownloadRsvdPage88XX
+         // download small beacon
+         SigninBeaconTXBD88XX(Adapter, beaconbuf, beaconPktLen);
+         
++        wait_cnt = 0;
+         HAL_RTL_W8(polling_reg, HAL_RTL_R8(polling_reg) | BIT(4));
+         while((HAL_RTL_R8(polling_reg) & BIT(4))== 0x10)
+         {
 diff --git a/WlanHAL/RTL88XX/Hal88XXGen.c b/WlanHAL/RTL88XX/Hal88XXGen.c
-index d646f21..13cca98 100755
+index d646f21..6665241 100755
 --- a/WlanHAL/RTL88XX/Hal88XXGen.c
 +++ b/WlanHAL/RTL88XX/Hal88XXGen.c
+@@ -6908,8 +6908,8 @@ GetHwReg88XX(
+ #endif //IS_RTL8814B_SERIES
+ #if IS_RTL8197G_SERIES
+         if ( IS_HARDWARE_TYPE_8197G(Adapter) ) {
+-            printk("[%s][MACDM_def_low_8197G]\n",__FUNCTION__); 
+-            *((dma_addr_t*)(val)) = (dma_addr_t)data_MACDM_def_low_8197G_start;   
++            printk("[%s][MACDM_gen_low_8197G]\n",__FUNCTION__);
++            *((dma_addr_t*)(val)) = (dma_addr_t)data_MACDM_gen_low_8197G_start;
+         }
+ #endif //IS_RTL8197G_SERIES  
+ 	}
+@@ -7091,7 +7091,7 @@ GetHwReg88XX(
+ 
+ #if IS_RTL8197G_SERIES
+         if ( IS_HARDWARE_TYPE_8197G(Adapter) ) {
+-            *((pu4Byte)(val)) = (u4Byte)(data_MACDM_gen_normal_8197G_end - data_MACDM_gen_normal_8197G_end);   
++            *((pu4Byte)(val)) = (u4Byte)(data_MACDM_gen_normal_8197G_end - data_MACDM_gen_normal_8197G_start);
+         }
+ #endif //IS_RTL8197G_SERIES
+ 
+@@ -8169,8 +8169,8 @@ InitLLT_Table88XX_V1(
+ 	// Step 3: Auto-init LLT table ( Set REG:0x208[BIT0] )
+ 	//Write 1 to enable HW init LLT, driver need polling to 0 meaning init success
+ 
+-	tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1);
+-	HAL_RTL_W8(REG_AUTO_LLT_V1, tmp1byte | BIT0);
++	tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;
++	HAL_RTL_W8(REG_AUTO_LLT_V1, tmp1byte);
+ 	while (tmp1byte & BIT0) {
+ 		tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1);
+ 		delay_us(10);
 @@ -9849,7 +9849,7 @@ InitMACSysyemCfg88XX(
      #endif
  	// TODO: Filen, no need to sync !?
@@ -539,6 +787,91 @@ index d646f21..13cca98 100755
  
  
      return RT_STATUS_SUCCESS;
+@@ -10185,8 +10185,12 @@ InitIMR88XX(
+ 		}
+ #endif
+ #if IS_RTL88XX_MAC_V3
+-    if (_GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v3) {  
+-        pHalData->IntMask[0]        |= BIT_HISR2_IND_INT | BIT_HISR3_IND_INT | BIT_HISR4_IND_INT | BIT_HISR5_IND_INT;
++    if (_GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v3) {
++        pHalData->IntMask[0]        |= BIT_HISR2_IND_INT | BIT_HISR3_IND_INT;
++#if IS_RTL8198F_SERIES
++        if (IS_HARDWARE_TYPE_8198F(Adapter))
++            pHalData->IntMask[0]    |= BIT_HISR4_IND_INT | BIT_HISR5_IND_INT;
++#endif
+     }
+ #endif
+ #if IS_RTL88XX_MAC_V4
+@@ -10721,8 +10725,9 @@ InitHCIDMAReg88XX_V1(
+         TX_HI1Q_TXBD_NUM_8814B,  TX_HI2Q_TXBD_NUM_8814B,    TX_HI3Q_TXBD_NUM_8814B,   TX_HI4Q_TXBD_NUM_8814B,  
+         TX_HI5Q_TXBD_NUM_8814B,  TX_HI6Q_TXBD_NUM_8814B,    TX_HI7Q_TXBD_NUM_8814B,  TX_HI8Q_TXBD_NUM_8814B,  
+         TX_HI9Q_TXBD_NUM_8814B,  TX_HI10Q_TXBD_NUM_8814B, TX_HI11Q_TXBD_NUM_8814B, TX_HI12Q_TXBD_NUM_8814B, 
+-        TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B, TX_FWCMDQ_TXBD_NUM_8814B,
+-        TX_CMDQ_TXBD_NUM_8814B,  TX_BCNQ_TXBD_NUM_V1
++        TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B,
++        TX_HI16Q_TXBD_NUM_8814B, TX_HI17Q_TXBD_NUM_8814B, TX_HI18Q_TXBD_NUM_8814B, TX_HI19Q_TXBD_NUM_8814B,
++        TX_FWCMDQ_TXBD_NUM_8814B, TX_CMDQ_TXBD_NUM_8814B, TX_BCNQ_TXBD_NUM_V1
+     };
+     u4Byte RXBD_NUM = RX_Q_RXBD_NUM_8814B;
+ #endif  //IS_EXIST_RTL8814BE 
+@@ -10824,21 +10829,17 @@ InitHCIDMAReg88XX_V1(
+         HAL_RTL_W32(REG_P0HI14Q_HI15Q_TXBD_NUM, BIT_P0HI14Q_DESC_MODE(TX_HI14Q_TXBD_MODE_SEL) |
+                     BIT_P0HI14Q_DESC_NUM(TXBD_NUM[29]) | BIT_P0HI15Q_DESC_MODE(TX_HI15Q_TXBD_MODE_SEL) |
+                     BIT_P0HI15Q_DESC_NUM(TXBD_NUM[30]));
+-#if 0 //port1-port4 use, no define now, yllin8814B       
+         HAL_RTL_W32(REG_P0HI16Q_HI17Q_TXBD_NUM, BIT_P0HI16Q_DESC_MODE(TX_HI16Q_TXBD_MODE_SEL) |
+-                    BIT_P0HI16Q_DESC_NUM(TX_HI16Q_TXBD_NUM) | BIT_P0HI17Q_DESC_MODE(TX_HI17Q_TXBD_MODE_SEL) |
+-                    BIT_P0HI17Q_DESC_NUM(TX_HI17Q_TXBD_NUM));
+-        
++                    BIT_P0HI16Q_DESC_NUM(TXBD_NUM[31]) | BIT_P0HI17Q_DESC_MODE(TX_HI17Q_TXBD_MODE_SEL) |
++                    BIT_P0HI17Q_DESC_NUM(TXBD_NUM[32]));
+         HAL_RTL_W32(REG_P0HI18Q_HI19Q_TXBD_NUM, BIT_P0HI18Q_DESC_MODE(TX_HI18Q_TXBD_MODE_SEL) |
+-                    BIT_P0HI18Q_DESC_NUM(TX_HI18Q_TXBD_NUM) | BIT_P0HI19Q_DESC_MODE(TX_HI19Q_TXBD_MODE_SEL) |
+-                    BIT_P0HI19Q_DESC_NUM(TX_HI19Q_TXBD_NUM));
+-        
+-#endif        
++                    BIT_P0HI18Q_DESC_NUM(TXBD_NUM[33]) | BIT_P0HI19Q_DESC_MODE(TX_HI19Q_TXBD_MODE_SEL) |
++                    BIT_P0HI19Q_DESC_NUM(TXBD_NUM[34]));
+         HAL_RTL_W16(REG_H2CQ_TXBD_NUM, BIT_H2CQ_DESC_MODE(TX_H2CQ_TXBD_MODE_SEL) |
+-                        BIT_H2CQ_DESC_NUM(TXBD_NUM[32]));
++                        BIT_H2CQ_DESC_NUM(TXBD_NUM[HCI_TX_DMA_QUEUE_CMD_V2]));
+ #ifdef WLAN_SUPPORT_FW_CMD
+         HAL_RTL_W16(REG_FWCMDQ_TXBD_NUM, BIT_FWCMDQ_DESC_MODE(TX_FWCMD_MODE_SEL) |
+-                        BIT_FWCMDQ_DESC_NUM(TXBD_NUM[31]));
++                        BIT_FWCMDQ_DESC_NUM(TXBD_NUM[HCI_TX_DMA_QUEUE_FWCMD]));
+ #endif
+         
+         //3 ===Set Beacon Mode: 2, 4, or 8 segment each descriptor===
+@@ -14204,12 +14205,12 @@ StopHW88XX(
+ 	HAL_RTL_W32(REG_HIMR1, 0);
+     HAL_RTL_W32(REG_HSIMR, 0); 
+     
+-#if IS_RTL88XX_MAC_V2    
+-    if ( _GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v2) {
+-        HAL_RTL_W32(REG_HIMR2, 0);    
++#if IS_RTL88XX_MAC_V2_V3
++    if (_GET_HAL_DATA(Adapter)->MacVersion.is_MAC_v2_v3) {
++        HAL_RTL_W32(REG_HIMR2, 0);
+         HAL_RTL_W32(REG_HIMR3, 0);
+     }
+-#endif 
++#endif
+    
+ #if CFG_HAL_TX_AMSDU
+     if ( IS_SUPPORT_TX_AMSDU(Adapter) ) {
+diff --git a/WlanHAL/RTL88XX/Hal88XXIsr.c b/WlanHAL/RTL88XX/Hal88XXIsr.c
+index 1f553e3..460e31a 100755
+--- a/WlanHAL/RTL88XX/Hal88XXIsr.c
++++ b/WlanHAL/RTL88XX/Hal88XXIsr.c
+@@ -1542,7 +1542,7 @@ RemoveInterruptMask88XX(
+ #if CFG_HAL_TX_AMSDU
+         case HAL_INT_TYPE_FS_TIMEOUT0:
+ #if (IS_RTL8197F_SERIES) || (IS_RTL8198F_SERIES) || (IS_RTL8192F_SERIES) || (IS_RTL8814A_SERIES) || (IS_RTL8814B_SERIES) || (IS_RTL8821C_SERIES) || (IS_RTL8822B_SERIES) || (IS_RTL8822C_SERIES) || (IS_RTL8812F_SERIES) || (IS_RTL8197G_SERIES)
+-			if (IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8198F(Adapter) || IS_HARDWARE_TYPE_8192F(Adapter) || IS_HARDWARE_TYPE_8814A(Adapter) || IS_HARDWARE_TYPE_8197F(Adapter) ||
++			if (IS_HARDWARE_TYPE_8197F(Adapter) || IS_HARDWARE_TYPE_8198F(Adapter) || IS_HARDWARE_TYPE_8192F(Adapter) || IS_HARDWARE_TYPE_8814A(Adapter) || IS_HARDWARE_TYPE_8197G(Adapter) ||
+ 				IS_HARDWARE_TYPE_8814B(Adapter) || IS_HARDWARE_TYPE_8821C(Adapter) || IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8822C(Adapter) || IS_HARDWARE_TYPE_8812F(Adapter))
+             pHalData->FtIntArray &= ~BIT_FS_PS_TIMEOUT0_EN;
+ #endif
 diff --git a/WlanHAL/RTL88XX/Hal88XXRxDesc.c b/WlanHAL/RTL88XX/Hal88XXRxDesc.c
 index 9187036..5e4ee26 100755
 --- a/WlanHAL/RTL88XX/Hal88XXRxDesc.c
@@ -570,10 +903,139 @@ index 9187036..5e4ee26 100755
              else
  #endif
 diff --git a/WlanHAL/RTL88XX/Hal88XXTxDesc.c b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
-index 565c2c4..3125e19 100755
+index 565c2c4..7f65030 100755
 --- a/WlanHAL/RTL88XX/Hal88XXTxDesc.c
 +++ b/WlanHAL/RTL88XX/Hal88XXTxDesc.c
-@@ -1905,9 +1905,12 @@ SyncSWTXBDHostIdxToHW88XX (
+@@ -102,6 +102,32 @@ static unsigned long mw5_linux6_tx_map(HAL_PADAPTER Adapter, void *ptr,
+ 	HAL_VIRT_TO_BUS1((Adapter), (PVOID)(ptr), (len), HAL_PCI_DMA_TODEVICE)
+ #endif
+ 
++#if CFG_HAL_TX_AMSDU
++static inline u4Byte rsd0614_amsdu_txbd_dma(HAL_PADAPTER Adapter,
++					    const void *cur_txbd_amsdu,
++					    u4Byte queueIndex, u4Byte host_idx)
++{
++#if defined(CONFIG_RTL8192CD_LINUX6_BUS) && defined(CONFIG_MW5_FORCE_WLAN_DEVICE_TABLE)
++	dma_addr_t dma_addr = 0;
++	if (rtl8197f_wlan_tx_ring_dma(Adapter, cur_txbd_amsdu,
++				      sizeof(TX_BUFFER_DESCRIPTOR_AMSDU),
++				      &dma_addr))
++		return (u4Byte)dma_addr + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL;
++#endif
++#if defined(CONFIG_NET_PCI) && defined(NOT_RTK_BSP)
++	if (queueIndex >= 1 && queueIndex <= 4 &&
++	    _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[queueIndex - 1])
++		return (u4Byte)(_GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[queueIndex - 1] +
++				host_idx * sizeof(TX_BUFFER_DESCRIPTOR_AMSDU)) +
++			CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL;
++#endif
++	return (u4Byte)HAL_VIRT_TO_BUS1(Adapter, (PVOID)cur_txbd_amsdu,
++					sizeof(TX_BUFFER_DESCRIPTOR_AMSDU),
++					HAL_PCI_DMA_TODEVICE) +
++		CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL;
++}
++#endif
++
+ 
+ #if (HAL_DEV_BUS_TYPE & (HAL_RT_EMBEDDED_INTERFACE | HAL_RT_PCI_INTERFACE))
+ void DumpTxBDesc88XX(
+@@ -175,10 +201,20 @@ void DumpTxBDesc88XX(
+         TX_HI1Q_TXBD_NUM_8814B,  TX_HI2Q_TXBD_NUM_8814B,    TX_HI3Q_TXBD_NUM_8814B,   TX_HI4Q_TXBD_NUM_8814B,  
+         TX_HI5Q_TXBD_NUM_8814B,  TX_HI6Q_TXBD_NUM_8814B,    TX_HI7Q_TXBD_NUM_8814B,  TX_HI8Q_TXBD_NUM_8814B,  
+         TX_HI9Q_TXBD_NUM_8814B,  TX_HI10Q_TXBD_NUM_8814B, TX_HI11Q_TXBD_NUM_8814B, TX_HI12Q_TXBD_NUM_8814B, 
+-        TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B, TX_BCNQ_TXBD_NUM_V1
+-
++        TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B,
++        TX_HI16Q_TXBD_NUM_8814B, TX_HI17Q_TXBD_NUM_8814B, TX_HI18Q_TXBD_NUM_8814B, TX_HI19Q_TXBD_NUM_8814B,
++        TX_FWCMDQ_TXBD_NUM_8814B, TX_CMDQ_TXBD_NUM_8814B, TX_BCNQ_TXBD_NUM_V1
+     };
+ #endif  //IS_EXIST_RTL8814BE 
++#if (IS_EXIST_RTL8197GEM)
++    u4Byte TXBD_NUM_V4[HCI_TX_DMA_QUEUE_MAX_NUM] =
++    {
++        TX_MGQ_TXBD_NUM_8197G,   TX_BKQ_TXBD_NUM_8197G,   TX_BEQ_TXBD_NUM_8197G,   TX_VIQ_TXBD_NUM_8197G,
++        TX_VOQ_TXBD_NUM_8197G,   NUM_TX_DESC_HQ_8197G,    NUM_TX_DESC_HQ_8197G,    NUM_TX_DESC_HQ_8197G,
++        NUM_TX_DESC_HQ_8197G,    NUM_TX_DESC_HQ_8197G,    NUM_TX_DESC_HQ_8197G,    NUM_TX_DESC_HQ_8197G,
++        NUM_TX_DESC_HQ_8197G,    TX_CMDQ_TXBD_NUM_8197G,  TX_BCNQ_TXBD_NUM_V1
++    };
++#endif  //IS_EXIST_RTL8197GEM
+ #if (IS_EXIST_RTL8192EE || IS_EXIST_RTL8192FE || IS_EXIST_RTL8814AE || IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE || IS_EXIST_RTL8197GEM)
+     // TXBD_RWPtr_Reg: no entry for beacon queue, set NULL here
+     u4Byte  TXBD_RWPtr_Reg[HCI_TX_DMA_QUEUE_MAX_NUM] =
+@@ -239,8 +275,9 @@ void DumpTxBDesc88XX(
+             REG_P0HI0Q_TXBD_IDX, REG_P0HI1Q_TXBD_IDX, REG_P0HI2Q_TXBD_IDX, REG_P0HI3Q_TXBD_IDX,
+             REG_P0HI4Q_TXBD_IDX, REG_P0HI5Q_TXBD_IDX, REG_P0HI6Q_TXBD_IDX, REG_P0HI7Q_TXBD_IDX,        
+             REG_P0HI8Q_TXBD_IDX, REG_P0HI9Q_TXBD_IDX, REG_P0HI10Q_TXBD_IDX, REG_P0HI11Q_TXBD_IDX,
+-            REG_P0HI12Q_TXBD_IDX, REG_P0HI13Q_TXBD_IDX, REG_P0HI14Q_TXBD_IDX, REG_P0HI15Q_TXBD_IDX, 
+-            0
++            REG_P0HI12Q_TXBD_IDX, REG_P0HI13Q_TXBD_IDX, REG_P0HI14Q_TXBD_IDX, REG_P0HI15Q_TXBD_IDX,
++            REG_P0HI16Q_TXBD_IDX, REG_P0HI17Q_TXBD_IDX, REG_P0HI18Q_TXBD_IDX, REG_P0HI19Q_TXBD_IDX,
++            REG_FWCMDQ_TXBD_IDX, REG_H2CQ_TXBD_IDX, 0
+         };
+ 
+     u4Byte  TXBD_Reg_H[HCI_TX_DMA_QUEUE_MAX_NUM_V2] =
+@@ -254,7 +291,8 @@ void DumpTxBDesc88XX(
+             REG_HI4Q_TXBD_DESA_H, REG_HI5Q_TXBD_DESA_H, REG_HI6Q_TXBD_DESA_H, REG_HI7Q_TXBD_DESA_H,
+             REG_HI8Q_TXBD_DESA_H, REG_HI9Q_TXBD_DESA_H, REG_HI10Q_TXBD_DESA_H, REG_HI11Q_TXBD_DESA_H,
+             REG_HI12Q_TXBD_DESA_H, REG_HI13Q_TXBD_DESA_H, REG_HI14Q_TXBD_DESA_H, REG_HI15Q_TXBD_DESA_H,
+-            REG_P0BCNQ_TXBD_DESA_H
++            REG_HI16Q_TXBD_DESA_H, REG_HI17Q_TXBD_DESA_H, REG_HI18Q_TXBD_DESA_H, REG_HI19Q_TXBD_DESA_H,
++            REG_FWCMDQ_TXBD_DESA_H, REG_H2CQ_TXBD_DESA_H, REG_P0BCNQ_TXBD_DESA_H
+         };
+ 
+     u4Byte  TXBD_Reg_L[HCI_TX_DMA_QUEUE_MAX_NUM_V2] =
+@@ -263,12 +301,13 @@ void DumpTxBDesc88XX(
+             REG_ACH3_TXBD_DESA_L, REG_ACH2_TXBD_DESA_L, REG_ACH1_TXBD_DESA_L, REG_ACH0_TXBD_DESA_L,
+             REG_ACH4_TXBD_DESA_L, REG_ACH5_TXBD_DESA_L, REG_ACH6_TXBD_DESA_L, REG_ACH7_TXBD_DESA_L,
+             REG_ACH8_TXBD_DESA_L, REG_ACH9_TXBD_DESA_L, REG_ACH10_TXBD_DESA_L, REG_ACH11_TXBD_DESA_L,
+-            REG_ACH12_TXBD_DESA_L, REG_ACH13_TXBD_DESA_L,  
++            REG_ACH12_TXBD_DESA_L, REG_ACH13_TXBD_DESA_L,
+             REG_HI0Q_TXBD_DESA_L, REG_HI1Q_TXBD_DESA_L, REG_HI2Q_TXBD_DESA_L, REG_HI3Q_TXBD_DESA_L,
+             REG_HI4Q_TXBD_DESA_L, REG_HI5Q_TXBD_DESA_L, REG_HI6Q_TXBD_DESA_L, REG_HI7Q_TXBD_DESA_L,
+             REG_HI8Q_TXBD_DESA_L, REG_HI9Q_TXBD_DESA_L, REG_HI10Q_TXBD_DESA_L, REG_HI11Q_TXBD_DESA_L,
+             REG_HI12Q_TXBD_DESA_L, REG_HI13Q_TXBD_DESA_L, REG_HI14Q_TXBD_DESA_L, REG_HI15Q_TXBD_DESA_L,
+-            REG_P0BCNQ_TXBD_DESA_L
++            REG_HI16Q_TXBD_DESA_L, REG_HI17Q_TXBD_DESA_L, REG_HI18Q_TXBD_DESA_L, REG_HI19Q_TXBD_DESA_L,
++            REG_FWCMDQ_TXBD_DESA_L, REG_H2CQ_TXBD_DESA_L, REG_P0BCNQ_TXBD_DESA_L
+         };
+ #endif
+ 
+@@ -293,13 +332,20 @@ void DumpTxBDesc88XX(
+     }
+ #endif  //IS_EXIST_RTL8881AEM
+ 
+-#if (IS_EXIST_RTL8192EE || IS_EXIST_RTL8192FE || IS_EXIST_RTL8814AE || IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8821CE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE || IS_EXIST_RTL8197GEM)
+-    if ( IS_HARDWARE_TYPE_8192EE(Adapter) || IS_HARDWARE_TYPE_8192FE(Adapter) || IS_HARDWARE_TYPE_8814AE(Adapter)|| IS_HARDWARE_TYPE_8197F(Adapter)|| IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8821C(Adapter) || IS_HARDWARE_TYPE_8822C(Adapter) || IS_HARDWARE_TYPE_8812F(Adapter) || IS_HARDWARE_TYPE_8197G(Adapter)) {
++#if (IS_EXIST_RTL8192EE || IS_EXIST_RTL8192FE || IS_EXIST_RTL8814AE || IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8821CE || IS_EXIST_RTL8822CE || IS_EXIST_RTL8812FE)
++    if ( IS_HARDWARE_TYPE_8192EE(Adapter) || IS_HARDWARE_TYPE_8192FE(Adapter) || IS_HARDWARE_TYPE_8814AE(Adapter)|| IS_HARDWARE_TYPE_8197F(Adapter)|| IS_HARDWARE_TYPE_8822B(Adapter) || IS_HARDWARE_TYPE_8821C(Adapter) || IS_HARDWARE_TYPE_8822C(Adapter) || IS_HARDWARE_TYPE_8812F(Adapter)) {
+         pTXBD_NUM           = TXBD_NUM_V1;
+ 		pTXBD_RWPtr_Reg		= TXBD_RWPtr_Reg;
+-		pTXBD_Reg			= TXBD_Reg;		
++		pTXBD_Reg			= TXBD_Reg;
++    }
++#endif
++#if IS_EXIST_RTL8197GEM
++    if (IS_HARDWARE_TYPE_8197G(Adapter)) {
++        pTXBD_NUM           = TXBD_NUM_V4;
++		pTXBD_RWPtr_Reg		= TXBD_RWPtr_Reg;
++		pTXBD_Reg			= TXBD_Reg;
+     }
+-#endif //#if (IS_EXIST_RTL8192EE || IS_EXIST_RTL8814AE || IS_EXIST_RTL8197FEM || IS_EXIST_RTL8822BE || IS_EXIST_RTL8197GEM)
++#endif
+ 
+ #if (IS_EXIST_RTL8198FEM)
+ 	if (IS_HARDWARE_TYPE_8198F(Adapter)) {
+@@ -902,8 +948,7 @@ original:
+ #endif //CONFIG_RTL_8198F
+ #endif //TRXBD_CACHABLE_REGION
+ 
+-        pdesc_dma_buf_amsdu = (pu1Byte)(((unsigned long)desc_dma_buf_start_amsdu) + \
+-            (HAL_PAGE_SIZE - (((unsigned long)desc_dma_buf_start_amsdu) & (HAL_PAGE_SIZE-1))));
++        pdesc_dma_buf_amsdu = (pu1Byte)ALIGN((unsigned long)desc_dma_buf_start_amsdu, HAL_PAGE_SIZE);
+         
+         //Transfer to Non-cachable address
+ #ifdef TRXBD_CACHABLE_REGION    
+@@ -1905,9 +1950,12 @@ SyncSWTXBDHostIdxToHW88XX (
           * 8822B producer/consumer register and request the existing vendor TX
           * DSR after each latency-critical MGT/HI0 doorbell.  The tasklet still
           * owns all ring locking and frees descriptors only after HW advances. */
@@ -588,7 +1050,7 @@ index 565c2c4..3125e19 100755
                  u4Byte mw5_rw = HAL_RTL_R32(cur_q->reg_rwptr_idx);
                  if (queueIndex == HCI_TX_DMA_QUEUE_MGT) {
                      u2Byte mw5_host = mw5_rw & 0x0fff;
-@@ -1971,7 +1974,8 @@ SyncSWTXBDHostIdxToHW88XX (
+@@ -1971,7 +2019,8 @@ SyncSWTXBDHostIdxToHW88XX (
                          break;
                      }
  
@@ -598,7 +1060,171 @@ index 565c2c4..3125e19 100755
                          Adapter->pshare->linux6_tx_dma_unmaps + 256) {
                          u2Byte mw5_host = mw5_rw & 0x0fff;
                          u2Byte mw5_hw = (mw5_rw >> 16) & 0x0fff;
-@@ -8868,10 +8872,28 @@ original:
+@@ -2252,7 +2301,7 @@ VOID ReprepareFillTxDescSetTxBD_92f(
+         platform_zero_memory(cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU));
+ 
+         SET_DESC_FIELD_NO_CLR(cur_txbd->TXBD_ELE[2].Dword1,
+-                HAL_VIRT_TO_BUS1(Adapter, (PVOID)cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU), HAL_PCI_DMA_TODEVICE) + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL,
++                rsd0614_amsdu_txbd_dma(Adapter, cur_txbd_amsdu, queueIndex, cur_q->host_idx),
+                 TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH);
+     }
+ #endif // CFG_HAL_TX_AMSDU
+@@ -2691,7 +2740,7 @@ ReprepareFillTxDescSetTxBD(
+         platform_zero_memory(cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU));
+ 
+         SET_DESC_FIELD_NO_CLR(cur_txbd->TXBD_ELE[2].Dword1,
+-                HAL_VIRT_TO_BUS1(Adapter, (PVOID)cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU), HAL_PCI_DMA_TODEVICE) + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL,
++                rsd0614_amsdu_txbd_dma(Adapter, cur_txbd_amsdu, queueIndex, cur_q->host_idx),
+                 TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH);
+     }
+ #endif // CFG_HAL_TX_AMSDU
+@@ -3239,7 +3288,7 @@ ReprepareFillTxDescSetTxBD_V1(
+         platform_zero_memory(cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU));
+ 
+         SET_DESC_FIELD_NO_CLR(cur_txbd->TXBD_ELE[2].Dword1,
+-                HAL_VIRT_TO_BUS1(Adapter, (PVOID)cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU), HAL_PCI_DMA_TODEVICE) + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL,
++                rsd0614_amsdu_txbd_dma(Adapter, cur_txbd_amsdu, queueIndex, cur_q->host_idx),
+                 TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH);
+     }
+ #endif // CFG_HAL_TX_AMSDU
+@@ -3713,15 +3762,9 @@ SetTxBufferDesc88XX (
+         ptx_dma_amsdu->tx_amsdu_queue[queueIndex-1].cur_txbd_element = 0;
+         platform_zero_memory(cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU));
+ 
+-#if defined(CONFIG_NET_PCI) && defined(NOT_RTK_BSP)
+         SET_DESC_FIELD_NO_CLR(cur_txbd->TXBD_ELE[2].Dword1,
+-                (_GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[queueIndex-1] + cur_q->host_idx*sizeof(TX_BUFFER_DESCRIPTOR_AMSDU)) + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL,
++                rsd0614_amsdu_txbd_dma(Adapter, cur_txbd_amsdu, queueIndex, cur_q->host_idx),
+                 TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH);
+-#else
+-        SET_DESC_FIELD_NO_CLR(cur_txbd->TXBD_ELE[2].Dword1,
+-                HAL_VIRT_TO_BUS1(Adapter, (PVOID)cur_txbd_amsdu, sizeof(TX_BUFFER_DESCRIPTOR_AMSDU), HAL_PCI_DMA_TODEVICE) + CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL,
+-                TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH);
+-#endif
+     }
+ #endif // CFG_HAL_TX_AMSDU
+ 
+@@ -4041,7 +4084,11 @@ SetTxBufferDesc88XX (
+                 HAL_PCI_DMA_TODEVICE);
+         }
+         
+-        if (payloadLen) {
++        if (payloadLen
++#if CFG_HAL_TX_AMSDU
++            && pdesc_data->aggreEn < FG_AGGRE_MSDU_FIRST
++#endif
++        ) {
+             HAL_CACHE_SYNC_WBACK(Adapter, 
+                 GET_DESC_FIELD(cur_txbd->TXBD_ELE[2].Dword1, TXBD_DW1_PHYADDR_LOW_MSK, TXBD_DW1_PHYADDR_LOW_SH) - CONFIG_LUNA_SLAVE_PHYMEM_OFFSET_HAL, 
+                 payloadLen, 
+@@ -4534,6 +4581,11 @@ SetBeaconDownload88XX (
+             sizeof(pTXBD->TXBD_ELE[0].Dword0));
+ #endif //CONFIG_RTL_8198F
+ #else
++#if defined(CONFIG_RTL8192CD_LINUX6_BUS) && defined(CONFIG_MW5_FORCE_WLAN_DEVICE_TABLE)
++        if (_GET_HAL_DATA(Adapter)->alloc_desc_bcn_addr)
++            wmb();
++        else
++#endif
+         HAL_CACHE_SYNC_WBACK(Adapter, HAL_VIRT_TO_BUS1(Adapter, (PVOID)pTXBD, sizeof(TX_BUFFER_DESCRIPTOR), HAL_PCI_DMA_TODEVICE),
+                         sizeof(TX_BUFFER_DESCRIPTOR), HAL_PCI_DMA_TODEVICE);
+ #endif //#ifdef TRXBD_CACHABLE_REGION
+@@ -7287,13 +7339,10 @@ FillBeaconDesc88XX_V2
+     
+         if (Adapter->pmib->dot11StationConfigEntry.beacon_rate != 0xff)
+             IE0_SET_TX_DESC_DATARATE(IE0_head,Adapter->pmib->dot11StationConfigEntry.beacon_rate);
+-        
+-#if 0//IS_EXIST_RTL8814BE //yllin8814B, do we need this?
+-        if(IS_HARDWARE_TYPE_8814B(Adapter)) {
+-            IE0_SET_TX_DESC_RTSRATE(IE0_head,4);
+-            IE0_SET_TX_DESC_DATARATE(IE0_head,4);
++        else if (Adapter->pmib->dot11RFEntry.phyBandSelect & PHY_BAND_5G) {
++            IE0_SET_TX_DESC_RTSRATE(IE0_head, 4);
++            IE0_SET_TX_DESC_DATARATE(IE0_head, 4);
+         }
+-#endif
+ 
+ #if 0 //yllin8814B where is TXPWR_OFSET ??
+ 	if (Adapter->bcnTxAGC ==1) {
+@@ -7313,14 +7362,11 @@ FillBeaconDesc88XX_V2
+     HAL_VAR_IS_40M_BW_BAK   = HAL_VAR_IS_40M_BW;
+     HAL_VAR_TX_BEACON_LEN   = txLength;
+     
+-    // Group Bit Control
+-    IE2_SET_TX_DESC_GROUP_BIT_IE_OFFSET(IE2_head,(HAL_VAR_TIM_OFFSET-24));
+-    
+-    // Auto set bitmap control by HW, no present in TXDESC document so reserved this code
++    // Group Bit Control: keep TIM IE offset intact in AP mode
+     if (HAL_OPMODE & WIFI_ADHOC_STATE) {
+-        IE2_SET_TX_DESC_GROUP_BIT_IE_OFFSET(IE2_head,0);
++        IE2_SET_TX_DESC_GROUP_BIT_IE_OFFSET(IE2_head, 0);
+     } else {
+-        IE2_SET_TX_DESC_GROUP_BIT_IE_OFFSET(IE2_head,1);
++        IE2_SET_TX_DESC_GROUP_BIT_IE_OFFSET(IE2_head, (HAL_VAR_TIM_OFFSET - 24));
+     }
+     
+     IE0_SET_TX_DESC_IE_NUM(IE0_head,0);
+@@ -8343,8 +8389,9 @@ PrepareTXBD88XX_V1(
+             TX_HI1Q_TXBD_NUM_8814B,  TX_HI2Q_TXBD_NUM_8814B,    TX_HI3Q_TXBD_NUM_8814B,   TX_HI4Q_TXBD_NUM_8814B,  
+             TX_HI5Q_TXBD_NUM_8814B,  TX_HI6Q_TXBD_NUM_8814B,    TX_HI7Q_TXBD_NUM_8814B,  TX_HI8Q_TXBD_NUM_8814B,  
+             TX_HI9Q_TXBD_NUM_8814B,  TX_HI10Q_TXBD_NUM_8814B, TX_HI11Q_TXBD_NUM_8814B, TX_HI12Q_TXBD_NUM_8814B, 
+-            TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B, TX_FWCMDQ_TXBD_NUM_8814B,
+-            TX_CMDQ_TXBD_NUM_8814B,  TX_BCNQ_TXBD_NUM_V1
++            TX_HI13Q_TXBD_NUM_8814B, TX_HI14Q_TXBD_NUM_8814B, TX_HI15Q_TXBD_NUM_8814B,
++            TX_HI16Q_TXBD_NUM_8814B, TX_HI17Q_TXBD_NUM_8814B, TX_HI18Q_TXBD_NUM_8814B, TX_HI19Q_TXBD_NUM_8814B,
++            TX_FWCMDQ_TXBD_NUM_8814B, TX_CMDQ_TXBD_NUM_8814B, TX_BCNQ_TXBD_NUM_V1
+         };
+ #endif  //IS_EXIST_RTL8814BE 
+ 
+@@ -8383,8 +8430,9 @@ PrepareTXBD88XX_V1(
+             REG_P0HI0Q_TXBD_IDX, REG_P0HI1Q_TXBD_IDX, REG_P0HI2Q_TXBD_IDX, REG_P0HI3Q_TXBD_IDX,
+             REG_P0HI4Q_TXBD_IDX, REG_P0HI5Q_TXBD_IDX, REG_P0HI6Q_TXBD_IDX, REG_P0HI7Q_TXBD_IDX,        
+             REG_P0HI8Q_TXBD_IDX, REG_P0HI9Q_TXBD_IDX, REG_P0HI10Q_TXBD_IDX, REG_P0HI11Q_TXBD_IDX,
+-            REG_P0HI12Q_TXBD_IDX, REG_P0HI13Q_TXBD_IDX, REG_P0HI14Q_TXBD_IDX, REG_P0HI15Q_TXBD_IDX, 
+-            REG_FWCMDQ_TXBD_IDX, TXBD_RWPtr_Reg_CMDQ,0
++            REG_P0HI12Q_TXBD_IDX, REG_P0HI13Q_TXBD_IDX, REG_P0HI14Q_TXBD_IDX, REG_P0HI15Q_TXBD_IDX,
++            REG_P0HI16Q_TXBD_IDX, REG_P0HI17Q_TXBD_IDX, REG_P0HI18Q_TXBD_IDX, REG_P0HI19Q_TXBD_IDX,
++            REG_FWCMDQ_TXBD_IDX, TXBD_RWPtr_Reg_CMDQ, 0
+         };
+ 
+     u4Byte  TXBD_Reg_H[HCI_TX_DMA_QUEUE_MAX_NUM_V2] =
+@@ -8398,7 +8446,8 @@ PrepareTXBD88XX_V1(
+             REG_HI4Q_TXBD_DESA_H, REG_HI5Q_TXBD_DESA_H, REG_HI6Q_TXBD_DESA_H, REG_HI7Q_TXBD_DESA_H,
+             REG_HI8Q_TXBD_DESA_H, REG_HI9Q_TXBD_DESA_H, REG_HI10Q_TXBD_DESA_H, REG_HI11Q_TXBD_DESA_H,
+             REG_HI12Q_TXBD_DESA_H, REG_HI13Q_TXBD_DESA_H, REG_HI14Q_TXBD_DESA_H, REG_HI15Q_TXBD_DESA_H,
+-            REG_FWCMDQ_TXBD_DESA_H, TXBD_Reg_CMDQ_H,REG_P0BCNQ_TXBD_DESA_H
++            REG_HI16Q_TXBD_DESA_H, REG_HI17Q_TXBD_DESA_H, REG_HI18Q_TXBD_DESA_H, REG_HI19Q_TXBD_DESA_H,
++            REG_FWCMDQ_TXBD_DESA_H, TXBD_Reg_CMDQ_H, REG_P0BCNQ_TXBD_DESA_H
+         };
+ 
+     u4Byte  TXBD_Reg_L[HCI_TX_DMA_QUEUE_MAX_NUM_V2] =
+@@ -8407,12 +8456,13 @@ PrepareTXBD88XX_V1(
+             REG_ACH3_TXBD_DESA_L, REG_ACH2_TXBD_DESA_L, REG_ACH1_TXBD_DESA_L, REG_ACH0_TXBD_DESA_L,
+             REG_ACH4_TXBD_DESA_L, REG_ACH5_TXBD_DESA_L, REG_ACH6_TXBD_DESA_L, REG_ACH7_TXBD_DESA_L,
+             REG_ACH8_TXBD_DESA_L, REG_ACH9_TXBD_DESA_L, REG_ACH10_TXBD_DESA_L, REG_ACH11_TXBD_DESA_L,
+-            REG_ACH12_TXBD_DESA_L, REG_ACH13_TXBD_DESA_L,            
++            REG_ACH12_TXBD_DESA_L, REG_ACH13_TXBD_DESA_L,
+             REG_HI0Q_TXBD_DESA_L, REG_HI1Q_TXBD_DESA_L, REG_HI2Q_TXBD_DESA_L, REG_HI3Q_TXBD_DESA_L,
+             REG_HI4Q_TXBD_DESA_L, REG_HI5Q_TXBD_DESA_L, REG_HI6Q_TXBD_DESA_L, REG_HI7Q_TXBD_DESA_L,
+             REG_HI8Q_TXBD_DESA_L, REG_HI9Q_TXBD_DESA_L, REG_HI10Q_TXBD_DESA_L, REG_HI11Q_TXBD_DESA_L,
+             REG_HI12Q_TXBD_DESA_L, REG_HI13Q_TXBD_DESA_L, REG_HI14Q_TXBD_DESA_L, REG_HI15Q_TXBD_DESA_L,
+-            REG_FWCMDQ_TXBD_DESA_L, TXBD_Reg_CMDQ_L,REG_P0BCNQ_TXBD_DESA_L
++            REG_HI16Q_TXBD_DESA_L, REG_HI17Q_TXBD_DESA_L, REG_HI18Q_TXBD_DESA_L, REG_HI19Q_TXBD_DESA_L,
++            REG_FWCMDQ_TXBD_DESA_L, TXBD_Reg_CMDQ_L, REG_P0BCNQ_TXBD_DESA_L
+         };
+ #endif
+ #if (IS_EXIST_RTL8198FEM)
+@@ -8742,8 +8792,7 @@ original:
+ #endif
+ #endif
+ 
+-        pdesc_dma_buf_amsdu = (pu1Byte)(((unsigned long)desc_dma_buf_start_amsdu) + \
+-            (HAL_PAGE_SIZE - (((unsigned long)desc_dma_buf_start_amsdu) & (HAL_PAGE_SIZE-1))));
++        pdesc_dma_buf_amsdu = (pu1Byte)ALIGN((unsigned long)desc_dma_buf_start_amsdu, HAL_PAGE_SIZE);
+         
+         //Transfer to Non-cachable address
+ #ifdef TRXBD_CACHABLE_REGION    
+@@ -8868,10 +8917,28 @@ original:
  #endif
  #if IS_RTL8814B_SERIES
          if (IS_HARDWARE_TYPE_8814B(Adapter)) {
@@ -631,6 +1257,79 @@ index 565c2c4..3125e19 100755
              }
          }
  #endif
+@@ -9064,6 +9131,15 @@ original:
+     ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_BE].pTXBD_head_amsdu = (PTX_BUFFER_DESCRIPTOR_AMSDU)((pu1Byte)ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_BK].pTXBD_head_amsdu + TX_BKQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU);
+     ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_VI].pTXBD_head_amsdu = (PTX_BUFFER_DESCRIPTOR_AMSDU)((pu1Byte)ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_BE].pTXBD_head_amsdu + TX_BEQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU);
+     ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_VO].pTXBD_head_amsdu = (PTX_BUFFER_DESCRIPTOR_AMSDU)((pu1Byte)ptx_dma_amsdu->tx_amsdu_queue[HCI_TX_AMSDU_DMA_QUEUE_VI].pTXBD_head_amsdu + TX_VIQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU);
++#ifdef CONFIG_NET_PCI
++    if (_GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[0]) {
++        unsigned long amsdu_off = (unsigned long)pdesc_dma_buf_amsdu - (unsigned long)HAL_TO_NONCACHE_ADDR((unsigned long)desc_dma_buf_start_amsdu);
++        unsigned long amsdu_dma0 = _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[0] + amsdu_off;
++        _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[1] = amsdu_dma0 + TX_BKQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU;
++        _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[2] = _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[1] + TX_BEQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU;
++        _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[3] = _GET_HAL_DATA(Adapter)->desc_dma_buf_addr_amsdu[2] + TX_VIQ_TXBD_NUM * sizeof(TXBD_ELEMENT) * MAX_NUM_OF_MSDU_IN_AMSDU;
++    }
++#endif
+     }
+ #endif
+ 
+@@ -9082,6 +9158,10 @@ SetTxDescQSel88XX_V2(
+ #if CFG_HAL_SUPPORT_TXDESC_IE    
+     u1Byte *IE1_head = (u1Byte *)ptx_desc + 16 + 8;
+ #endif    
++	if (IS_HARDWARE_TYPE_8197G(Adapter) && queueIndex == HCI_TX_DMA_QUEUE_CMD) {
++		SET_TX_DESC_QSEL(ptx_desc, TXDESC_QSEL_CMD);
++		return;
++	}
+ 	switch (queueIndex) {    	
+         case HCI_TX_DMA_QUEUE_CMD_V1:
+             q_select = TXDESC_QSEL_CMD;
+@@ -9130,8 +9210,8 @@ SetTxDescQSel88XX_V2(
+ #else
+             q_select = drvTID;
+ #endif  //CFG_HAL_RTL_MANUAL_EDCA
+-           // HIQ packet
+-            if((queueIndex >= HCI_TX_DMA_QUEUE_HI0_V1) && (queueIndex<=HCI_TX_DMA_QUEUE_HI15)) {
++           // HIQ packet (8197G uses 15-queue layout: HI0..HI7 = 5..12, CMD = 13)
++            if((queueIndex >= HCI_TX_DMA_QUEUE_HI0_V1) && (queueIndex <= (IS_HARDWARE_TYPE_8197G(Adapter) ? HCI_TX_DMA_QUEUE_HI7 : HCI_TX_DMA_QUEUE_HI15))) {
+ #ifdef SUPPORT_TXDESC_IE
+                 if(IS_SUPPORT_TXDESC_IE(Adapter)){
+                     IE1_SET_TX_DESC_MOREDATA(IE1_head,1);            
+diff --git a/WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c b/WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c
+index 67e4ec3..b2dfb93 100755
+--- a/WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c
++++ b/WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c
+@@ -261,7 +261,7 @@ hal_Associate_8197G(
+     pHalFunc->SetBeaconDownloadHandler      = SetBeaconDownload88XX;
+     pHalFunc->FillBeaconDescHandler         = FillBeaconDesc88XX_V1;    
+     pHalFunc->GetTxQueueHWIdxHandler        = GetTxQueueHWIdx88XX;
+-    pHalFunc->MappingTxQueueHandler         = MappingTxQueue88XX_V1;
++    pHalFunc->MappingTxQueueHandler         = MappingTxQueue88XX;
+     pHalFunc->QueryTxConditionMatchHandler  = QueryTxConditionMatch88XX;
+     pHalFunc->FillTxDescHandler             = FillTxDesc88XX_V1;
+     pHalFunc->FillShortCutTxDescHandler     = FillShortCutTxDesc88XX_V1;
+@@ -322,7 +322,7 @@ hal_Associate_8197G(
+     pHalFunc->CAMReadMACConfigHandler       =   CAMReadMACConfig88XX;
+     pHalFunc->CAMEmptyEntryHandler          =   CAMEmptyEntry88XX_V1;
+     pHalFunc->CAMFindUsableHandler          =   CAMFindUsable88XX;
+-    pHalFunc->CAMProgramEntryHandler        =   CAMProgramEntry88XX;
++    pHalFunc->CAMProgramEntryHandler        =   CAMProgramEntry88XX_V1;
+ 
+ 
+     //
+diff --git a/WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h b/WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h
+index fc6dafa..8fb862c 100755
+--- a/WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h
++++ b/WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h
+@@ -6,7 +6,7 @@
+ #define RX_Q_RXBD_NUM_8814B             NUM_RX_DESC
+ #define TX_CMDQ_TXBD_NUM_8814B          32
+ #define NUM_TX_DESC_CMDQ_8814B        	32
+-#define TX_HIQ_NUM_8814B                16
++#define TX_HIQ_NUM_8814B                20
+ #define SIZE_TXDESC_88XX_8814B          64
+ 
+ 
 diff --git a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c b/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c
 index da6a594..fff2480 100755
 --- a/WlanHAL/RTL88XX/RTL8814B/Hal8814BGen.c

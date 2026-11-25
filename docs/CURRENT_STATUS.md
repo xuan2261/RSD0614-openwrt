@@ -70,7 +70,7 @@ Consolidates fixes for the `v5.6.2` `FillBeaconDesc88XX_V2` panic **plus** every
 ## Verification boundary
 
 - v5.3.9..v5.6.2 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, VLAN 1/2, `1552B` `reg1200=7fcb maxLen088c=0610`), `RTL8197FH-VG` 6-dword `eth0` (`newdesc=1`, `CPUICR=e4000000`, `MACCR=804a1485`, zero false `PRESSURE`/`RX-STALL` resets), `PCIe0` attempt 1/3 (`10ec:b814`), and `rtl8192cd.ko` dual-radio attach + read-only `/dev/mtd1` factory RF calibration + `rtl8192cd.sh` MIB apply on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.3 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` audit & `deep_audit.py`: **PENDING_CI_RUN_V563**.
+- v5.6.3 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` audit & `deep_audit.py`: **PASS** (CI run `#45610643244`, `6m21s`, `4,217,008` bytes / `0x004058B0`, `decoded_size=14,613,145` bytes / `13.94 MiB`, SHA-256 `16db41ef25aa915c025d57976adcf01971955578fb0252d4f9a4f55307186602`, `32/32` offline policy checks PASS, `rtl8192cd.ko` `undef=157 missing=0 proc_init=1 giwname=1 bss=689152B`).
 - v5.6.3 dual-band AP bring-up (`RSD0614-OpenWrt-5G` + `RSD0614-OpenWrt-2G`), WPA2-PSK client association, full-MTU LuCI/SSH, and Wi-Fi<->LAN throughput on physical RSD0614 V1.0: **NOT YET VERIFIED FOR v5.6.3**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

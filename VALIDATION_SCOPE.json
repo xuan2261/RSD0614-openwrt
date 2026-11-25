@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.6.3",
+  "bundle_version": "5.6.4",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 139,
+  "regression_tests_per_run": 140,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (CI run 45610643244, 6m21s warm cache, 4217008 bytes / 0x004058B0, decoded_size 14613145 bytes / 13.94 MiB, SHA-256 16db41ef25aa915c025d57976adcf01971955578fb0252d4f9a4f55307186602, deep_audit 32/32 PASS, rtl8192cd.ko undef=157 missing=0 proc_init=1 giwname=1 bss=689152B)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.3",
+  "openwrt_compile": "NOT YET VERIFIED FOR v5.6.4",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.4",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.6.2 physical RAM-boot verified PCIe0 attempt 1/3 (LTSSM=0x03983311, link_up=1), RTL8367S 1552B max-frame persistence across swconfig (reg1200=7fcb maxLen088c=0610), CPUICR=e4000000, MACCR=804a1485, GDSR0=005c406d (zero PRESSURE/RX-STALL spam), both wlan0 (RTL8814BR) and wlan1 (RTL8197G) attach + read-only /dev/mtd1 factory RF load (applied=11/9 rejected=0), and rtl8192cd.sh MIB/WPA2 setup (Set MIB Success, [WPA2]M Cipher=[4]), while isolating the FillBeaconDesc88XX_V2 NULL dereference panic (pdesc=NULL, BadVA=0 caused by 34-entry vs 38-entry RTL8814B TXBD tables leaving BCN_V2 queue 37 NULL) plus audited downstream RTL8814BR/RTL8197G/AMSDU/HIQ_En/netifd/33s-dropbear blockers all fixed in v5.6.3",
-  "preflight": "PASS (139/139 local & CI regression tests)",
-  "previous_build_result": "v5.6.2 run 45520998735: compile (6m25s warm cache), deep_audit (32/32 PASS), 4220464 bytes / 0x00406630, decoded_size 14611097 bytes (13.93 MiB), SHA-256 6cdc86de0a0d346cd7cb6fedf4408237060b823d0bb20d9969de0442c25f88b3, rtl8192cd.ko undef=157 missing=0 proc_init=1 giwname=1 bss=689152B"
+  "previous_hardware_result": "v5.6.3 physical RAM-boot verified zero kernel panic, full-MTU LuCI web login + Dropbear SSH login, PCIe0 attempt 1/3 (LTSSM=0x03983311), RTL8367S 1552B max-frame persistence (reg1200=7fcb maxLen088c=0610), CPUICR=e4000000, MACCR=804a1485, both 5 GHz RTL8814BR (wlan0, ch 36 VHT80) & 2.4 GHz RTL8197G (wlan1, ch 6 HT20) APs UP & forwarding in br-lan with read-only /dev/mtd1 factory RF calibration (tgpwr=17/19 dBm), and real phone WPA2-PSK association on 5 GHz (VHT NSS2-MCS9 780 Mbps, tx_fail=0, 4-chain RSSI 79, DHCP 192.168.1.179, 26.5 MiB free RAM), while auditing and resolving stale switch0 4K CVLAN 7 WAN->LAN bypass, missing 02_network switch0 topology, brsnoop block_relay=1 client isolation, WEXT/LuCI display bugs, UART RX byte-stealing at n=512, 32x swnic boot spam, reset button safety, and survey escaping bugs in v5.6.4",
+  "preflight": "PASS (140/140 local & CI regression tests)",
+  "previous_build_result": "v5.6.3 run 45610643244: compile (6m21s warm cache), deep_audit (32/32 PASS), 4217008 bytes / 0x004058B0, decoded_size 14613145 bytes (13.94 MiB), SHA-256 16db41ef25aa915c025d57976adcf01971955578fb0252d4f9a4f55307186602, rtl8192cd.ko undef=157 missing=0 proc_init=1 giwname=1 bss=689152B"
 }

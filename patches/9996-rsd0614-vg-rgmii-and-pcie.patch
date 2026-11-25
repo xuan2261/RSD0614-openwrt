@@ -519,7 +519,7 @@ index 3e7f6b4..3215b66 100644
  /* ---- global interrupt controller (GICR) --------------------------------- */
  #define GIMR				(0x000 + GICR_BASE)	/* global interrupt mask */
 diff --git a/drivers/net/ethernet/rtl819x/rtl819x_swnic.c b/drivers/net/ethernet/rtl819x/rtl819x_swnic.c
-index 2e2718e..845bf09 100644
+index 2e2718e..104e97a 100644
 --- a/drivers/net/ethernet/rtl819x/rtl819x_swnic.c
 +++ b/drivers/net/ethernet/rtl819x/rtl819x_swnic.c
 @@ -75,6 +75,38 @@ static int pid_dump;
@@ -808,13 +808,13 @@ index 2e2718e..845bf09 100644
 +		o5 = rd->opts5;
 +		len = o2 & 0x3fffu;
 +
-+		{
++		if (unlikely(pid_dump > 0)) {
 +			static int nrxt;
 +			if (nrxt < 24) {
 +				nrxt++;
-+				pr_err("swnic new-rx#%d idx=%u len=%u port=%u vid=%u reason=%04x o1=%08x o4=%08x o5=%08x\n",
-+				       nrxt, idx, len, (o4 >> 13) & 0x7u,
-+				       (o4 >> 16) & 0xfffu, o3 & 0xffffu, o1, o4, o5);
++				pr_info("swnic new-rx#%d idx=%u len=%u port=%u vid=%u reason=%04x o1=%08x o4=%08x o5=%08x\n",
++					nrxt, idx, len, (o4 >> 13) & 0x7u,
++					(o4 >> 16) & 0xfffu, o3 & 0xffffu, o1, o4, o5);
 +			}
 +		}
 +
@@ -961,14 +961,14 @@ index 2e2718e..845bf09 100644
 +		tx_ri[idx].skb = (uintptr_t)skb;
 +		tx_ri[idx].dma = (dma_addr_t)(uintptr_t)output;
 +
-+		{
++		if (unlikely(pid_dump > 0)) {
 +			static int ntxt;
 +			if (ntxt < 8) {
 +				ntxt++;
-+				pr_err("swnic new-tx#%d idx=%u len=%u vid=%u dp=%02x vtag=%03x o1=%08x\n",
-+				       ntxt, idx, len, nicTx->vid & 0xfffu,
-+				       nicTx->portlist & 0x7fu, vtag,
-+				       o1 | DESC_SWCORE_OWNED);
++				pr_info("swnic new-tx#%d idx=%u len=%u vid=%u dp=%02x vtag=%03x o1=%08x\n",
++					ntxt, idx, len, nicTx->vid & 0xfffu,
++					nicTx->portlist & 0x7fu, vtag,
++					o1 | DESC_SWCORE_OWNED);
 +			}
 +		}
 +
@@ -1044,10 +1044,10 @@ index f4d97bc..05b0681 100644
  void New_swNic_freeRings(void);
  
 diff --git a/drivers/net/phy/rtl8367b.c b/drivers/net/phy/rtl8367b.c
-index a2834ed..87067d1 100644
+index a2834ed..c2fd702 100644
 --- a/drivers/net/phy/rtl8367b.c
 +++ b/drivers/net/phy/rtl8367b.c
-@@ -1029,10 +1029,37 @@ static int rtl8367b_extif_init_of(struct rtl8366_smi *smi, int id,
+@@ -1029,10 +1029,62 @@ static int rtl8367b_extif_init_of(struct rtl8366_smi *smi, int id,
   */
  static struct rtl8366_smi *g_dir842_smi;
  
@@ -1078,6 +1078,31 @@ index a2834ed..87067d1 100644
 +	return rtl8366_smi_write_reg(smi, 0x088d, 0x0610);
 +}
 +
++static int rtl8367b_set_vlan_4k(struct rtl8366_smi *smi,
++				const struct rtl8366_vlan_4k *vlan4k);
++
++/*
++ * RTL8367S skips rtl8367b_reset_chip() HW reset to keep the loader RGMII
++ * uplink alive, and rtl8366_reset_vlan() only clears the 32-entry MC table.
++ * Explicitly clear 4K CVLAN entries 0..31 so stale probe-seeded VLANs 3..8
++ * (including VLAN 7 with all ports 0..7 untagged) never bridge tagged WAN
++ * frames onto LAN ports.
++ */
++static int rtl8367s_clear_stale_vlans(struct rtl8366_smi *smi)
++{
++	struct rtl8366_vlan_4k empty;
++	int vid, err;
++
++	memset(&empty, 0, sizeof(empty));
++	for (vid = 0; vid < RTL8367B_NUM_VLANS; vid++) {
++		empty.vid = vid;
++		err = rtl8367b_set_vlan_4k(smi, &empty);
++		if (err)
++			return err;
++	}
++	return 0;
++}
++
  int rtl8367s_cpu_tag_enable(void)
  {
  	struct rtl8366_smi *smi = g_dir842_smi;
@@ -1086,7 +1111,7 @@ index a2834ed..87067d1 100644
  	unsigned int cpuport;
  
  	if (!smi)
-@@ -1060,11 +1087,15 @@ int rtl8367s_cpu_tag_enable(void)
+@@ -1060,11 +1112,15 @@ int rtl8367s_cpu_tag_enable(void)
  	rtl8366_smi_write_reg(smi, 0x0891, 0x00ff);
  	rtl8366_smi_write_reg(smi, 0x0892, 0x00ff);
  	rtl8366_smi_write_reg(smi, 0x0893, 0x00ff);
@@ -1103,7 +1128,21 @@ index a2834ed..87067d1 100644
  	return 0;
  }
  EXPORT_SYMBOL(rtl8367s_cpu_tag_enable);
-@@ -1301,9 +1332,16 @@ static int rtl8367b_setup(struct rtl8366_smi *smi)
+@@ -1160,11 +1216,11 @@ static int rtl8367b_setup(struct rtl8366_smi *smi)
+ 		u32 dr, dv, cpu_mask = 0;
+ 		for (dr = 0x1219; dr <= 0x121c; dr++) {
+ 			rtl8366_smi_read_reg(smi, dr, &dv);
+-			printk(KERN_ERR "DIR842 8367Sdump[%04x]=%04x\n", dr, dv);
++			pr_debug("rtl8367s dump[%04x]=%04x\n", dr, dv);
+ 		}
+ 		for (dr = 0x0890; dr <= 0x0893; dr++) {
+ 			rtl8366_smi_read_reg(smi, dr, &dv);
+-			printk(KERN_ERR "DIR842 8367Sdump[%04x]=%04x\n", dr, dv);
++			pr_debug("rtl8367s dump[%04x]=%04x\n", dr, dv);
+ 		}
+ 
+ 		/* ★ STOCK PARITY, decoded from the stock kernel itself. At
+@@ -1301,9 +1357,19 @@ static int rtl8367b_setup(struct rtl8366_smi *smi)
  		}
  	}
  
@@ -1114,6 +1153,9 @@ index a2834ed..87067d1 100644
 +	 * trunk = 1526B for 1500B MTU), 1536 bytes on legacy RTL8367B/R. */
 +	if (rtl8367b_is_8367s(smi)) {
 +		err = rtl8367s_set_max_len_1552(smi);
++		if (err)
++			return err;
++		err = rtl8367s_clear_stale_vlans(smi);
 +		if (err)
 +			return err;
 +	} else {

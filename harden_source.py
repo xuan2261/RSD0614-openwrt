@@ -191,19 +191,86 @@ run_probe() {
 }
 
 print_backup_guide() {
-\tcat <<'EOF'
+	cat <<'EOF'
 === RSD0614 READ-ONLY PRIVATE BACKUP GUIDE (FAIL-CLOSED) ===
 1. Persistent flash is strictly NO-GO. Never invoke flash erase or write tools.
 2. Always read from the kernel read-only character nodes (/dev/mtd<N>ro for N=0..5),
    never writable MTD or mtdblock nodes, after confirming writeable_bit_0x400=0.
-3. Because RAM is 64 MiB and full SPI NOR is 8 MiB, stream or copy one read-only
-   partition at a time into /tmp (tmpfs in RAM), hash it with sha256sum, transfer
-   it privately to your offline workstation, and delete the /tmp copy before the next.
+3. Because RAM is 64 MiB and full SPI NOR is 8 MiB, NEVER buffer full dumps in /tmp.
+   Stream each read-only partition directly over SSH onto your private offline PC
+   and verify SHA-256 on both sides:
+     for p in 0:bootloader 1:cfg 2:firmware 3:cpe 4:cfm 5:cfm_backup; do
+       n=${p%%:*}; name=${p#*:}
+       ssh root@192.168.1.1 "dd if=/dev/mtd${n}ro bs=65536 2>/dev/null" > "mtd${n}-${name}.bin"
+       rhash=$(ssh root@192.168.1.1 "sha256sum /dev/mtd${n}ro | awk '{print \\$1}'")
+       lhash=$(sha256sum "mtd${n}-${name}.bin" | awk '{print $1}')
+       echo "mtd${n} (${name}): router=${rhash} local=${lhash}"
+     done
+     cat mtd0-bootloader.bin mtd1-cfg.bin mtd2-firmware.bin mtd3-cpe.bin mtd4-cfm.bin mtd5-cfm_backup.bin > rsd0614-full-8mb.bin
+     sha256sum rsd0614-full-8mb.bin
 4. HARD PRIVACY INVARIANT (AGENTS.md):
    NEVER commit, upload, paste, or share full-flash backups or partition dumps of
    cfg (index 1), cpe (index 3), cfm (index 4), or cfm_backup (index 5) — they hold
    device-unique MAC addresses, calibration tables, PINs, PSKs, and credentials.
 EOF
+}
+
+print_flash_layout() {
+	echo "=== FLASH_LAYOUT_READONLY_AUDIT ==="
+	echo "policy=STRUCTURAL_HEADERS_ONLY (mtd0ro & mtd2ro only; zero bytes read from cfg/cpe/cfm/cfm_backup)"
+	for idx in 0 2; do
+		d="/sys/class/mtd/mtd$idx"
+		[ -d "$d" ] || { echo "mtd${idx}=sysfs_absent"; continue; }
+		name="$(cat "$d/name" 2>/dev/null || echo unknown)"
+		size="$(cat "$d/size" 2>/dev/null || echo 0)"
+		esize="$(cat "$d/erasesize" 2>/dev/null || echo 0)"
+		flags="$(cat "$d/flags" 2>/dev/null || echo 0x0)"
+		wbit=$(( (flags & 0x400) != 0 ? 1 : 0 ))
+		printf "mtd%s name=%s size=%s erasesize=%s flags=%s writeable_bit_0x400=%s\\n" \\
+			"$idx" "$name" "$size" "$esize" "$flags" "$wbit"
+	done
+	echo "--- mtd0ro bootloader capability tokens ---"
+	if [ -c /dev/mtd0ro ]; then
+		m0_first="$(dd if=/dev/mtd0ro bs=16 count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" "\\n"' || true)"
+		printf "mtd0ro_first16=%s\\n" "${m0_first:-unavailable}"
+		tokens="$(dd if=/dev/mtd0ro bs=65536 count=2 2>/dev/null | tr -cd '[:print:]\\n' | grep -Eo 'cr6c|cs6c|r6cr|80a00000|81000000|BH25Q64|RTL8197F-VG|AUTOBURN' | sort -u | tr '\\n' ' ' || true)"
+		printf "mtd0ro_tokens=%s\\n" "${tokens:-none}"
+	else
+		echo "mtd0ro=device_absent"
+	fi
+	echo "--- mtd2ro stock firmware 64KiB structural map ---"
+	if [ -c /dev/mtd2ro ]; then
+		m2_size="$(cat /sys/class/mtd/mtd2/size 2>/dev/null || echo 7995392)"
+		m2_hdr="$(dd if=/dev/mtd2ro bs=16 count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" "\\n"' || true)"
+		printf "mtd2ro_hdr16=%s size=%s\\n" "${m2_hdr:-unavailable}" "$m2_size"
+		blocks=$(( m2_size / 65536 ))
+		step=0
+		non_ff=0
+		while [ "$step" -lt "$blocks" ]; do
+			m4="$(dd if=/dev/mtd2ro bs=4 skip=$(( step * 16384 )) count=1 2>/dev/null | hexdump -v -e '4/1 "%02x" "\\n"' || true)"
+			off=$(( step * 65536 ))
+			case "$m4" in
+				68737173) printf "block=%03d off=0x%06x magic=hsqs(squashfs-le)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				73717368) printf "block=%03d off=0x%06x magic=sqsh(squashfs-be)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				72366372) printf "block=%03d off=0x%06x magic=r6cr(rtk-rootfs)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				726f6f74) printf "block=%03d off=0x%06x magic=root\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				63723663) printf "block=%03d off=0x%06x magic=cr6c(rtk-kernel)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				63733663) printf "block=%03d off=0x%06x magic=cs6c(rtk-cfg)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				deadc0de) printf "block=%03d off=0x%06x magic=deadc0de(jffs2-eof)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				19852003) printf "block=%03d off=0x%06x magic=19852003(jffs2)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
+				ffffffff|"") ;;
+				*) non_ff=$(( non_ff + 1 )) ;;
+			esac
+			step=$(( step + 1 ))
+		done
+		printf "mtd2ro_blocks_total=%d mtd2ro_blocks_non_ff=%d\\n" "$blocks" "$non_ff"
+		if [ "$m2_size" -ge 32 ]; then
+			tail32="$(dd if=/dev/mtd2ro bs=32 skip=$(( m2_size / 32 - 1 )) count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" " "' || true)"
+			printf "mtd2ro_tail32=%s\\n" "${tail32:-unavailable}"
+		fi
+	else
+		echo "mtd2ro=device_absent"
+	fi
 }
 
 print_wifi() {
@@ -217,7 +284,8 @@ print_wifi() {
 		dev="$(cat "$p/device" 2>/dev/null || echo ?)"
 		cls="$(cat "$p/class" 2>/dev/null || echo ?)"
 		irq="$(cat "$p/irq" 2>/dev/null || echo ?)"
-		drv="$(basename "$(readlink "$p/driver" 2>/dev/null)" 2>/dev/null || echo none)"
+		drv="$(basename "$(readlink "$p/driver" 2>/dev/null || true)" 2>/dev/null || true)"
+		[ -n "$drv" ] || drv="none"
 		printf "%s vendor=%s device=%s class=%s irq=%s driver=%s\\n" "$bn" "$ven" "$dev" "$cls" "$irq" "$drv"
 	done
 	echo "=== WIFI_NETDEVS ==="
@@ -249,9 +317,9 @@ print_wifi() {
 		echo "=== IWPRIV_NONSECRET ==="
 		for iface in wlan0 wlan1; do
 			[ -d "/sys/class/net/$iface" ] || continue
-			for mib in channel band phyBandSelect use40M 2ndchoffset encmode psk_enable; do
-				val="$(iwpriv "$iface" get_mib "$mib" 2>/dev/null | tr '\\n' ' ')"
-				[ -n "$val" ] && printf "%s %s\\n" "$iface" "$val"
+			for mib in channel band phyBandSelect use40M 2ndchoffset block_relay encmode psk_enable; do
+				val="$(iwpriv "$iface" get_mib "$mib" 2>/dev/null | sed -E 's/^.*get_mib:[[:space:]]*//' | tr '\\n' ' ' | sed 's/[[:space:]]*$//')"
+				[ -n "$val" ] && printf "%s %s=%s\\n" "$iface" "$mib" "$val"
 			done
 		done
 	fi
@@ -261,12 +329,12 @@ print_wifi() {
 		echo "--- $d ---"
 		if [ -r "$d/mib_rf" ]; then
 			echo "[mib_rf_key_fields]"
-			grep -Ei 'rfe_type|pa_type|trswitch|txpwr_lmt|MIMO_TR_mode|dot11channel|phyBandSelect|xcap' "$d/mib_rf" 2>/dev/null || true
+			grep -Ei 'rfe_type|pa_type|trswitch|txpwr_lmt|MIMO_TR_mode|dot11channel|phyBandSelect|xcap|tgpwr' "$d/mib_rf" 2>/dev/null || true
 		fi
 		for f in mib_rf mib_operation sta_info; do
 			[ -r "$d/$f" ] || continue
 			echo "[$f]"
-			grep -Eiv 'passphrase|psk|key|pin|wep|secret' "$d/$f" 2>/dev/null | head -n 40 || true
+			grep -Eiv 'passphrase|psk|key|pin|wep|secret' "$d/$f" 2>/dev/null | head -n 55 || true
 		done
 	done
 	if [ -d /sys/kernel/debug/rtl8192cd ]; then
@@ -288,20 +356,27 @@ print_wifi() {
 print_net() {
 	echo "=== NET_SYSCTL_AND_MEMORY ==="
 	grep -E '^(MemTotal|MemFree|MemAvailable|Slab|SReclaimable|SUnreclaim):' /proc/meminfo 2>/dev/null || true
-	cat /proc/sys/vm/min_free_kbytes 2>/dev/null | awk '{printf "vm.min_free_kbytes=%s\n", $0}' || true
+	printf "vm.min_free_kbytes=%s\\n" "$(cat /proc/sys/vm/min_free_kbytes 2>/dev/null || echo unavailable)"
 	echo "=== NET_BRIDGE_AND_LINKS ==="
 	brctl show 2>/dev/null || true
 	ip -4 addr show 2>/dev/null || ifconfig 2>/dev/null || true
-	ip -s link show 2>/dev/null || true
+	ip link show 2>/dev/null || true
+	cat /proc/net/dev 2>/dev/null || true
+	brctl showmacs br-lan 2>/dev/null || true
+	echo "=== NET_ROUTES_AND_NAT ==="
+	ip route 2>/dev/null || true
+	iptables -t nat -S 2>/dev/null || true
 	echo "=== NET_SWITCH0_SUMMARY ==="
 	swconfig dev switch0 show 2>/dev/null | grep -E 'VLAN|ports:|link:|pvid:' || true
 	echo "=== NET_LISTENERS ==="
 	netstat -lntup 2>/dev/null || netstat -lntu 2>/dev/null || true
 	echo "=== NET_FIREWALL_FILTER ==="
-	iptables -S 2>/dev/null | head -n 60 || true
+	iptables -S 2>/dev/null | head -n 120 || true
+	echo "=== INPUT_DEVICES ==="
+	cat /proc/bus/input/devices 2>/dev/null || true
 	echo "=== NET_WIRELESS_UBUS_SANITIZED ==="
 	if command -v ubus >/dev/null 2>&1; then
-		ubus call network.wireless status 2>/dev/null | sed -E 's/("key"[[:space:]]*:[[:space:]]*)"[^"]*"/\1"REDACTED"/g' || true
+		ubus call network.wireless status 2>/dev/null | sed -E 's/("key"[[:space:]]*:[[:space:]]*)"[^"]*"/\\1"REDACTED"/g' || true
 	fi
 	echo "=== NET_ETH_SWITCH_DMESG ==="
 	dmesg | grep -Ei 'rtl819x|8367S|switch0|br-lan|eth0|dropbear|uhttpd' | tail -n 60 || true
@@ -342,11 +417,14 @@ case "$cmd" in
 		print_net
 		print_wifi
 		;;
+	flash-layout)
+		print_flash_layout
+		;;
 	backup-guide)
 		print_backup_guide
 		;;
 	*)
-		echo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|net|diag|backup-guide}" >&2
+		echo "Usage: rsd0614-survey {passive|buttons [seconds]|probe-smi|probe-wmac|probe-pcie0|probe-all|wifi|net|diag|flash-layout|backup-guide}" >&2
 		exit 2
 		;;
 esac
@@ -364,6 +442,7 @@ rockspace,rsd0614)
 	# eth0.2 = LAN (VID2, ports 0..3), eth0.1 = WAN (VID1, port 4).
 	# Deterministic locally-administered MACs (LAN != WAN; zero device secrets).
 	ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"
+	ucidef_add_switch "switch0" "4:wan" "0:lan" "1:lan" "2:lan" "3:lan" "6t@eth0"
 	ucidef_set_interface_macaddr "lan" "02:06:14:00:00:01"
 	ucidef_set_interface_macaddr "wan" "02:06:14:00:00:02"
 	;;
@@ -379,6 +458,12 @@ WIFI_NETIFD_SCRIPT="""#!/bin/sh
 # Unverified panel LED GPIOs are intentionally never touched.
 . /lib/functions.sh
 . /lib/netifd/netifd-wireless.sh
+
+# netifd's _wireless_set_brsnoop_isolation injects isolate=1 for bridged APs
+# whenever network.lan.multicast_to_unicast is enabled, causing rtl8192cd
+# block_relay=1 to drop all same-radio STA-to-STA unicast. Override only this
+# implicit injection hook so explicit UCI option isolate remains authoritative.
+_wireless_set_brsnoop_isolation() { return 0; }
 
 init_wireless_driver "$@"
 
@@ -509,7 +594,7 @@ rtl_emit_encryption() {
 			echo "${p}_psk_enable=2"
 			echo "${p}_wpa_cipher=0"
 			echo "${p}_wpa2_cipher=$cbits"
-			echo "${p}_passphrase=\\"$key\\""
+			printf '%s="%s"\\n' "${p}_passphrase" "$key"
 			;;
 		psk-mixed|psk+psk2)
 			rtl_validate_psk "$key" || return 1
@@ -520,7 +605,7 @@ rtl_emit_encryption() {
 			echo "${p}_psk_enable=3"
 			echo "${p}_wpa_cipher=$cbits"
 			echo "${p}_wpa2_cipher=$cbits"
-			echo "${p}_passphrase=\\"$key\\""
+			printf '%s="%s"\\n' "${p}_passphrase" "$key"
 			;;
 		psk)
 			rtl_validate_psk "$key" || return 1
@@ -531,7 +616,7 @@ rtl_emit_encryption() {
 			echo "${p}_psk_enable=1"
 			echo "${p}_wpa_cipher=$cbits"
 			echo "${p}_wpa2_cipher=0"
-			echo "${p}_passphrase=\\"$key\\""
+			printf '%s="%s"\\n' "${p}_passphrase" "$key"
 			;;
 		*)
 			return 1
@@ -590,7 +675,7 @@ rtl8192cd_emit_vif() {
 
 	{
 		echo "${ifname}_opmode=16"
-		echo "${ifname}_ssid=\\"$ssid\\""
+		printf '%s="%s"\\n' "${ifname}_ssid" "$ssid"
 		echo "${ifname}_hiddenAP=${hidden:-0}"
 		echo "${ifname}_block_relay=${isolate:-0}"
 		echo "${ifname}_stanum=${maxassoc:-0}"
@@ -667,7 +752,11 @@ drv_rtl8192cd_setup() {
 		echo "${phy_ifname}_2ndchoffset=$(rtl_htmode_to_offset "$htmode" "$phy_band" "$channel")"
 		echo "${phy_ifname}_bcnint=${beacon_int:-100}"
 		echo "${phy_ifname}_dtimperiod=${dtim_period:-1}"
-		[ "${noscan:-0}" = "1" ] && echo "${phy_ifname}_coexist=0"
+		if [ "${noscan:-0}" = "1" ]; then
+			echo "${phy_ifname}_coexist=0"
+		else
+			echo "${phy_ifname}_coexist=1"
+		fi
 	} > "$FRAGFILE"
 
 	for_each_interface "ap" rtl8192cd_emit_vif
@@ -675,6 +764,7 @@ drv_rtl8192cd_setup() {
 		rm -f "$FRAGFILE"
 		rtl_merge_fragments
 		lock -u "$LOCKFILE"
+		wireless_set_retry 0
 		wireless_setup_failed NO_VALID_VIF
 		return 1
 	fi
@@ -722,7 +812,8 @@ add_driver rtl8192cd
 """
 UCI_99_NETWORK="""#!/bin/sh
 # Configure RTL8367S switch0 VLANs (VID1=WAN port 4, VID2=LAN ports 0..3,
-# trunk cpu_port=6 tagged), RAM-boot LAN/WAN interfaces, and M3 dual-band Wi-Fi.
+# trunk cpu_port=6 tagged), RAM-boot LAN/WAN interfaces, software flow
+# offloading, and M3 dual-band Wi-Fi.
 mkdir -p /tmp/Wireless
 [ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s /tmp/Wireless /etc/Wireless
 [ "$(uci -q get system.@system[0].rsd0614_m3_seeded)" = "1" ] && exit 0
@@ -754,11 +845,15 @@ set network.lan.proto='static'
 set network.lan.ipaddr='192.168.1.1'
 set network.lan.netmask='255.255.255.0'
 set network.lan.macaddr='02:06:14:00:00:01'
+set network.lan.multicast_to_unicast='0'
 set network.wan='interface'
 set network.wan.ifname='eth0.1'
 set network.wan.proto='dhcp'
 set network.wan.macaddr='02:06:14:00:00:02'
 commit network
+set firewall.@defaults[0].flow_offloading='1'
+set firewall.@defaults[0].flow_offloading_hw='0'
+commit firewall
 set wireless.radio0='wifi-device'
 set wireless.radio0.type='rtl8192cd'
 set wireless.radio0.phy='wlan0'
@@ -814,7 +909,22 @@ stop() {
 	[ -w /sys/module/rtl819x/parameters/hwnat ] && echo 0 > /sys/module/rtl819x/parameters/hwnat
 }
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.3-m3-wifi-bringup-fixed-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+RC_BUTTON_RESET="""#!/bin/sh
+# Rock Space RSD0614 V1.0 RAM-boot safe Reset button handler (&gpio1 4).
+# Never invokes overlay/rootfs reset or flash write/erase tools.
+# Short accidental taps (<3s) are ignored; holding >=3s reboots cleanly back to stock.
+if [ "$ACTION" = "released" ]; then
+	if [ "${SEEN:-0}" -ge 3 ]; then
+		logger -t rsd0614-reset "Reset button held ${SEEN}s: rebooting RAM-boot session"
+		sync
+		reboot
+	else
+		logger -t rsd0614-reset "Ignoring short reset tap (${SEEN:-0}s < 3s)"
+	fi
+fi
+exit 0
+"""
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.4-m3-router-hardened-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.button/reset':RC_BUTTON_RESET,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)

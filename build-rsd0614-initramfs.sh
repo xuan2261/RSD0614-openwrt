@@ -166,7 +166,7 @@ snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
 \t\t\t\t\tcrypto_modes.push(['psk',       'WPA-PSK',                     21]);
 \t\t\t\t}
 """
-if "hwtype == 'rtl8192cd'" not in text:
+if "crypto_modes.push(['psk2',      'WPA2-PSK',                    35]);\n\t\t\t\t\tcrypto_modes.push(['psk-mixed'" not in text or "\t\t\t\telse if (hwtype == 'rtl8192cd') {\n\t\t\t\t\tcrypto_modes.push" not in text:
     anchor = """\t\t\t\telse if (hwtype == 'broadcom') {
 \t\t\t\t\tcrypto_modes.push(['psk2',     'WPA2-PSK',                    33]);
 \t\t\t\t\tcrypto_modes.push(['psk+psk2', 'WPA-PSK/WPA2-PSK Mixed Mode', 22]);
@@ -177,11 +177,96 @@ if "hwtype == 'rtl8192cd'" not in text:
         raise SystemExit(f"Expected single broadcom crypto_modes anchor in {p}, found {text.count(anchor)}")
     text = text.replace(anchor, anchor + snippet, 1)
 
+dev_snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\to = ss.taboption('advanced', CBIWifiCountryValue, 'country', _('Country Code'));
+\t\t\t\t\to.wifiNetwork = radioNet;
+
+\t\t\t\t\to = ss.taboption('advanced', form.Flag, 'noscan', _('Force 40MHz mode'), _('Always use 40MHz channels even if the secondary channel overlaps.'));
+\t\t\t\t\to.rmempty = true;
+
+\t\t\t\t\to = ss.taboption('advanced', form.Value, 'beacon_int', _('Beacon Interval'));
+\t\t\t\t\to.datatype = 'range(15,65535)';
+\t\t\t\t\to.placeholder = 100;
+\t\t\t\t\to.rmempty = true;
+
+\t\t\t\t\to = ss.taboption('advanced', form.Value, 'dtim_period', _('DTIM Interval'), _('Delivery Traffic Indication Message Interval'));
+\t\t\t\t\to.optional = true;
+\t\t\t\t\to.placeholder = 1;
+\t\t\t\t\to.datatype = 'range(1,255)';
+\t\t\t\t}
+"""
+if "\t\t\t\telse if (hwtype == 'rtl8192cd') {\n\t\t\t\t\to = ss.taboption('advanced', CBIWifiCountryValue" not in text:
+    dev_anchor = """\t\t\t\t\to = ss.taboption('advanced', form.Value, 'beacon_int', _('Beacon Interval'));
+\t\t\t\t\to.datatype = 'range(15,65535)';
+\t\t\t\t\to.placeholder = 100;
+\t\t\t\t\to.rmempty = true;
+\t\t\t\t}
+"""
+    if text.count(dev_anchor) != 1:
+        raise SystemExit(f"Expected single device beacon_int anchor in {p}, found {text.count(dev_anchor)}")
+    text = text.replace(dev_anchor, dev_anchor + dev_snippet, 1)
+
+mode_old = """\t\t\t\to = ss.taboption('general', form.ListValue, 'mode', _('Mode'));
+\t\t\t\to.value('ap', _('Access Point'));
+\t\t\t\to.value('sta', _('Client'));
+\t\t\t\to.value('adhoc', _('Ad-Hoc'));
+"""
+mode_new = """\t\t\t\to = ss.taboption('general', form.ListValue, 'mode', _('Mode'));
+\t\t\t\to.value('ap', _('Access Point'));
+\t\t\t\tif (hwtype != 'rtl8192cd') {
+\t\t\t\t\to.value('sta', _('Client'));
+\t\t\t\t\to.value('adhoc', _('Ad-Hoc'));
+\t\t\t\t}
+"""
+if mode_new not in text:
+    if text.count(mode_old) != 1:
+        raise SystemExit(f"Expected single mode ListValue anchor in {p}, found {text.count(mode_old)}")
+    text = text.replace(mode_old, mode_new, 1)
+
+iface_snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\to = ss.taboption('general', form.Flag, 'hidden', _('Hide <abbr title="Extended Service Set Identifier">ESSID</abbr>'));
+\t\t\t\t\to.depends('mode', 'ap');
+
+\t\t\t\t\to = ss.taboption('advanced', form.Flag, 'isolate', _('Isolate Clients'), _('Prevents client-to-client communication'));
+\t\t\t\t\to.depends('mode', 'ap');
+
+\t\t\t\t\to = ss.taboption('advanced', form.Value, 'maxassoc', _('Max Clients'), _('Maximum number of associated clients (0 = unlimited)'));
+\t\t\t\t\to.optional = true;
+\t\t\t\t\to.placeholder = 0;
+\t\t\t\t\to.datatype = 'uinteger';
+\t\t\t\t}
+"""
+if "\t\t\t\telse if (hwtype == 'rtl8192cd') {\n\t\t\t\t\to = ss.taboption('general', form.Flag, 'hidden'" not in text:
+    iface_anchor = """\t\t\t\t\to = ss.taboption('advanced', form.Flag, 'disassoc_low_ack', _('Disassociate On Low Acknowledgement'), _('Allow AP mode to disconnect STAs based on low ACK condition'));
+\t\t\t\t\to.default = o.enabled;
+\t\t\t\t}
+"""
+    if text.count(iface_anchor) != 1:
+        raise SystemExit(f"Expected single iface disassoc_low_ack anchor in {p}, found {text.count(iface_anchor)}")
+    text = text.replace(iface_anchor, iface_anchor + iface_snippet, 1)
+
+wep_old = """\t\t\t\tcrypto_modes.push(['wep-open',   _('WEP Open System'), 11]);
+\t\t\t\tcrypto_modes.push(['wep-shared', _('WEP Shared Key'),  10]);
+\t\t\t\tcrypto_modes.push(['none',       _('No Encryption'),   0]);
+"""
+wep_new = """\t\t\t\tif (hwtype != 'rtl8192cd') {
+\t\t\t\t\tcrypto_modes.push(['wep-open',   _('WEP Open System'), 11]);
+\t\t\t\t\tcrypto_modes.push(['wep-shared', _('WEP Shared Key'),  10]);
+\t\t\t\t}
+\t\t\t\tcrypto_modes.push(['none',       _('No Encryption'),   0]);
+"""
+if wep_new not in text:
+    if text.count(wep_old) != 1:
+        raise SystemExit(f"Expected single wep crypto_modes anchor in {p}, found {text.count(wep_old)}")
+    text = text.replace(wep_old, wep_new, 1)
+
 p.write_text(text)
 updated = p.read_text()
 assert "hwtype == 'rtl8192cd'" in updated
+assert "hwtype != 'rtl8192cd'" in updated
 assert "htmodelist.VHT80 = true;" in updated
 assert "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" in updated
+assert "'maxassoc'" in updated
 print("LUCI_WIRELESS_JS_RTL8192CD: PASS")
 PY
 python3 - "$OPENWRT_DIR/package/network/services/dropbear/files/dropbear.init" <<'PY'

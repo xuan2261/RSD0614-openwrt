@@ -44,7 +44,7 @@ index 29968c4..3a1c9e1 100755
  // NFJROM CONFIG
  //-------------------------------------------------------------
 diff --git a/8192cd_comapi.c b/8192cd_comapi.c
-index cce51db..7639b63 100755
+index cce51db..26381f9 100644
 --- a/8192cd_comapi.c
 +++ b/8192cd_comapi.c
 @@ -512,10 +512,10 @@ int rtl_wx_get_sens(struct net_device *dev,
@@ -95,7 +95,145 @@ index cce51db..7639b63 100755
  int rtl_siwfreq(struct net_device *dev,
  			struct iw_request_info *info,
  			union iwreq_data *wrqu, char *extra)
-@@ -3620,24 +3648,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
+@@ -728,15 +756,18 @@ int rtl_giwfreq(struct net_device *dev,
+ #endif
+ 
+ 	ch = priv->pmib->dot11RFEntry.dot11channel;
+-/*
+-	MAP_CHANNEL_ID_TO_KHZ(ch, m);
+-	wrqu->freq.m = m * 100;
+-	wrqu->freq.e = 1;
+-	wrqu->freq.i = 0;
+-*/
+-	wrqu->freq.m = ch;
+-	wrqu->freq.e = 0;
+-	wrqu->freq.i = 0;
++	if (ch > 0) {
++		unsigned long m = 0;
++
++		MAP_CHANNEL_ID_TO_KHZ(ch, m);
++		wrqu->freq.m = m * 100;
++		wrqu->freq.e = 1;
++		wrqu->freq.i = 0;
++	} else {
++		wrqu->freq.m = ch;
++		wrqu->freq.e = 0;
++		wrqu->freq.i = 0;
++	}
+ 	
+ 	return 0;
+ }
+@@ -948,14 +979,15 @@ int rtl_giwrange(struct net_device *dev,
+ 	range->num_encoding_sizes = 2;
+ 	range->max_encoding_tokens = 4;
+ 	range->num_channels = priv->available_chnl_num;
+-	range->num_frequency = priv->available_chnl_num;
+-	
+-	for (i = 0; i < priv->available_chnl_num && i < IW_MAX_FREQUENCIES; i++) {
++	range->num_frequency = (priv->available_chnl_num < IW_MAX_FREQUENCIES)
++				? priv->available_chnl_num
++				: IW_MAX_FREQUENCIES;
++
++	for (i = 0; i < range->num_frequency; i++) {
+ 		u32 m = 0;
+-		range->freq[i].i = i + 1;
+-		//range->freq[val].m = CH_HZ_ID_MAP[i].freqKHz * 100000;
++		range->freq[i].i = priv->available_chnl[i];
+ 		MAP_CHANNEL_ID_TO_KHZ(priv->available_chnl[i], m);
+-		range->freq[i].m = m* 100;
++		range->freq[i].m = m * 100;
+ 		range->freq[i].e = 1;
+ 	}
+ 
+@@ -1358,9 +1390,45 @@ int rtl_giwrate(struct net_device *dev,
+ 	else
+ 		txRate = get_rate_from_bit_value(priv->pmib->dot11StationConfigEntry.fixedTxRate);
+ 
+-	//printk ("txRate = %d\n", txRate);
+-	wrqu->bitrate.value = txRate * 1000000;
+-    wrqu->bitrate.disabled = 0;
++	{
++#ifdef RTK_AC_SUPPORT
++		extern const u2Byte VHT_MCS_DATA_RATE[3][2][40];
++#endif
++		unsigned int half_mbps = txRate;
++		unsigned int bw = priv->pshare ? priv->pshare->is_40m_bw : 0;
++		unsigned int sg = 0;
++
++		if (bw > 2)
++			bw = 2;
++		if (bw == 2)
++			sg = priv->pmib->dot11nConfigEntry.dot11nShortGIfor80M ? 1 : 0;
++		else if (bw == 1)
++			sg = priv->pmib->dot11nConfigEntry.dot11nShortGIfor40M ? 1 : 0;
++		else
++			sg = priv->pmib->dot11nConfigEntry.dot11nShortGIfor20M ? 1 : 0;
++
++#ifdef RTK_AC_SUPPORT
++		if (is_VHT_rate(txRate)) {
++			unsigned int idx = txRate - VHT_RATE_ID;
++			if (idx < 40)
++				half_mbps = VHT_MCS_DATA_RATE[bw][sg][idx];
++		} else if (is_MCS_rate(txRate)) {
++			unsigned int idx = txRate - HT_RATE_ID;
++			unsigned int vht_idx = (idx / 8) * 10 + (idx % 8);
++			unsigned int ht_bw = (bw >= 1) ? 1 : 0;
++			unsigned int ht_sg = ht_bw
++				? (priv->pmib->dot11nConfigEntry.dot11nShortGIfor40M ? 1 : 0)
++				: (priv->pmib->dot11nConfigEntry.dot11nShortGIfor20M ? 1 : 0);
++			if (vht_idx < 40)
++				half_mbps = VHT_MCS_DATA_RATE[ht_bw][ht_sg][vht_idx];
++		}
++#endif
++		if (half_mbps > 4294)
++			half_mbps = 4294;
++		wrqu->bitrate.value = (s32)(half_mbps * 500000U);
++	}
++	wrqu->bitrate.fixed = !priv->pmib->dot11StationConfigEntry.autoRate;
++	wrqu->bitrate.disabled = 0;
+ 
+     return 0;
+ }
+@@ -1705,8 +1773,36 @@ int rtl_giwencode(struct net_device *dev,
+ 	else if (priv->pmib->dot1180211AuthEntry.dot11PrivacyAlgrthm == _NO_PRIVACY_) {
+ 		erq->length = 0;
+ 		erq->flags = IW_ENCODE_DISABLED;
+-	} 
+-	
++	} else {
++		erq->length = 0;
++		erq->flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY | IW_ENCODE_RESTRICTED;
++	}
++
++	return 0;
++}
++
++int rtl_giwtxpow(struct net_device *dev,
++			struct iw_request_info *info,
++			union iwreq_data *wrqu, char *extra)
++{
++	RTL_PRIV *priv = GET_DEV_PRIV(dev);
++	int dbm = 17;
++
++	(void)info;
++	(void)extra;
++	if (priv == NULL)
++		return -ENETDOWN;
++#ifndef WIFI_HAPD
++	if (!netif_running(priv->dev))
++		return -ENETDOWN;
++#endif
++	if (priv->pshare && priv->pshare->tgpwr_HT1S_NEW > 0)
++		dbm = priv->pshare->tgpwr_HT1S_NEW / 4;
++
++	wrqu->txpower.value = dbm;
++	wrqu->txpower.fixed = 0;
++	wrqu->txpower.disabled = 0;
++	wrqu->txpower.flags = IW_TXPOW_DBM;
+ 	return 0;
+ }
+ 
+@@ -3620,24 +3716,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
  	int ret = 0;
  
  	oldfs = get_fs();
@@ -124,7 +262,7 @@ index cce51db..7639b63 100755
  
  err_close:
  	filp_close(fp, NULL);
-@@ -3713,13 +3736,16 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3713,13 +3804,16 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		return -1;
  	}
  	
@@ -142,7 +280,7 @@ index cce51db..7639b63 100755
  		return -1;
  	}
  	
-@@ -3731,7 +3757,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3731,7 +3825,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		//int i=0;
  		
  		memset(cmd_buf, 0, MAX_PARAM_BUF_SIZE);
@@ -151,7 +289,7 @@ index cce51db..7639b63 100755
  		memset(valstr, 0, MAX_PARAM_BUF_SIZE);
  		
  		line_head = next_head;
-@@ -3748,6 +3774,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3748,6 +3842,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  #ifdef VENDOR_PARAM_COMPATIBLE	
  		/* To compatible with other vendor's parameters, each parameter must have its own process function - chris*/
  		loc = strchr(mibstart, '=');
@@ -160,7 +298,7 @@ index cce51db..7639b63 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - miblen -1;
  		if (vallen>0) {			
-@@ -3770,6 +3798,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3770,6 +3866,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			continue;
  		
  		loc = strchr(mibstart, '=');
@@ -169,7 +307,7 @@ index cce51db..7639b63 100755
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - (strlen(dev->name)+1) - (miblen+1);
  		
-@@ -3777,8 +3807,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3777,8 +3875,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			
  			ret = set_mib(priv, mibstart);
  			if (ret < 0) {
@@ -222,20 +360,23 @@ index cae2491..d9adc34 100755
  		)
  		{
 diff --git a/8192cd_ioctl.c b/8192cd_ioctl.c
-index 9768da7..ba13866 100755
+index 9768da7..fb231ed 100644
 --- a/8192cd_ioctl.c
 +++ b/8192cd_ioctl.c
-@@ -1075,6 +1075,9 @@ extern int rtl_giwpower(struct net_device *dev,
+@@ -1075,6 +1075,12 @@ extern int rtl_giwpower(struct net_device *dev,
  
  #endif
  
 +extern int rtl_giwname(struct net_device *dev,
 +				struct iw_request_info *info,
 +				union iwreq_data *wrqu, char *extra);
++extern int rtl_giwtxpow(struct net_device *dev,
++				struct iw_request_info *info,
++				union iwreq_data *wrqu, char *extra);
  static const iw_handler rtl_iwhandler[] =
  {
  	(iw_handler) NULL,						/* SIOCSIWCOMMIT */
-@@ -1083,7 +1086,7 @@ static const iw_handler rtl_iwhandler[] =
+@@ -1083,7 +1089,7 @@ static const iw_handler rtl_iwhandler[] =
  	(iw_handler) rtl_wx_dummy,                              /* SIOCSIWNWID   */
  	(iw_handler) rtl_wx_dummy,                              /* SIOCGIWNWID   */
  #else
@@ -244,7 +385,16 @@ index 9768da7..ba13866 100755
  	(iw_handler) NULL,						/* SIOCSIWNWID	 */
  	(iw_handler) NULL,						/* SIOCGIWNWID	 */
  #endif
-@@ -16623,7 +16626,11 @@ int rtl8192cd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+@@ -1145,7 +1151,7 @@ static const iw_handler rtl_iwhandler[] =
+ 	(iw_handler) rtl_siwfrag,				/* SIOCSIWFRAG	 */
+ 	(iw_handler) rtl_giwfrag,				/* SIOCGIWFRAG	 */
+ 	(iw_handler) NULL,						/* SIOCSIWTXPOW  */
+-	(iw_handler) NULL,						/* SIOCGIWTXPOW  */
++	(iw_handler) rtl_giwtxpow,				/* SIOCGIWTXPOW  */
+ 	(iw_handler) rtl_siwretry,				/* SIOCSIWRETRY  */
+ 	(iw_handler) rtl_giwretry,				/* SIOCGIWRETRY  */
+ 	(iw_handler) rtl_siwencode,				/* SIOCSIWENCODE */
+@@ -16623,7 +16629,11 @@ int rtl8192cd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
  #ifdef __OSK__
  #define VERIFY_WRITE 1
  #endif
@@ -256,7 +406,7 @@ index 9768da7..ba13866 100755
  			if (!ret) {
  				ret = -EFAULT;
  				DEBUG_ERR("user space valid check error!\n");
-@@ -20157,7 +20164,7 @@ case SIOC_SHIFT_POWER_INDEX:
+@@ -20157,7 +20167,7 @@ case SIOC_SHIFT_POWER_INDEX:
  	}
  #endif
  
@@ -266,7 +416,7 @@ index 9768da7..ba13866 100755
  	{
  		priv->pshare->wlangeneral_pid= -1;
 diff --git a/8192cd_osdep.c b/8192cd_osdep.c
-index 90c8937..efc4f77 100755
+index 90c8937..f70fd64 100644
 --- a/8192cd_osdep.c
 +++ b/8192cd_osdep.c
 @@ -4870,7 +4870,10 @@ static int rtl8192cd_init_sw(struct rtl8192cd_priv *priv)
@@ -418,7 +568,15 @@ index 90c8937..efc4f77 100755
  			//default add into mbssid cam, vxd or vap as client mode will enable BIT 24 if macclone or vap is enabled.
  #endif
  		}
-@@ -12119,6 +12136,13 @@ free_res:
+@@ -11495,6 +11512,7 @@ do_hw_init:
+ #if defined(CONFIG_PCI_HCI) || !defined(CONFIG_NETDEV_MULTI_TX_QUEUE)
+ 		if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+ 			netif_start_queue(dev);		// start queue always
++			netif_carrier_on(dev);
+ 		}
+ #endif
+ #if defined(CONFIG_USB_HCI) || defined(CONFIG_SDIO_HCI)
+@@ -12119,6 +12137,13 @@ free_res:
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  	if (priv && IS_ROOT_INTERFACE(priv) && priv->pshare->linux_dev) {
  		if (priv->pshare->linux6_irq_requested) {
@@ -432,7 +590,15 @@ index 90c8937..efc4f77 100755
  			free_irq(dev->irq, dev);
  			priv->pshare->linux6_irq_requested = false;
  		}
-@@ -13100,6 +13124,13 @@ int rtl8192cd_close(struct net_device *dev)
+@@ -12525,6 +12550,7 @@ int rtl8192cd_close(struct net_device *dev)
+     SAVE_INT_AND_CLI(flags);
+ 	SMP_TRY_LOCK(flags, locked);	
+ #ifdef __KERNEL__
++	netif_carrier_off(dev);
+ 	netif_tx_stop_all_queues(dev);
+ #endif	
+ #ifdef WDS
+@@ -13100,6 +13126,13 @@ int rtl8192cd_close(struct net_device *dev)
  #endif
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  				if (priv->pshare->linux6_irq_requested) {
@@ -446,7 +612,7 @@ index 90c8937..efc4f77 100755
  					free_irq(dev->irq, dev);
  					priv->pshare->linux6_irq_requested = false;
  				}
-@@ -13222,8 +13253,17 @@ int rtl8192cd_close(struct net_device *dev)
+@@ -13222,8 +13255,17 @@ int rtl8192cd_close(struct net_device *dev)
  
  #ifdef CONFIG_WLAN_HAL_8197G
  	if (IS_ROOT_INTERFACE(priv) && (GET_CHIP_VER(priv)==VERSION_8197G)) {
@@ -465,7 +631,7 @@ index 90c8937..efc4f77 100755
  	}
  #endif //CONFIG_WLAN_HAL_8197G
  
-@@ -14496,7 +14536,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
+@@ -14496,7 +14538,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -474,7 +640,7 @@ index 90c8937..efc4f77 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14524,7 +14564,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
+@@ -14524,7 +14566,7 @@ static const struct net_device_ops rtl8192cd_netdev_ops_usb = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -483,7 +649,7 @@ index 90c8937..efc4f77 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -14546,7 +14586,7 @@ static const struct net_device_ops mesh_netdev_ops = {
+@@ -14546,7 +14588,7 @@ static const struct net_device_ops mesh_netdev_ops = {
          .ndo_set_rx_mode        = rtl8192cd_set_rx_mode,
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -492,7 +658,7 @@ index 90c8937..efc4f77 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = mesh_start_xmit,
-@@ -14961,14 +15001,38 @@ int rtl8197f_wlan_tx_ring_dma(struct rtl8192cd_priv *priv, const void *entry,
+@@ -14961,14 +15003,38 @@ int rtl8197f_wlan_tx_ring_dma(struct rtl8192cd_priv *priv, const void *entry,
  			    size_t length, dma_addr_t *address)
  {
  	HAL_DATA_TYPE *hal = _GET_HAL_DATA(priv);
@@ -539,7 +705,7 @@ index 90c8937..efc4f77 100755
  	unsigned int i;
  
  	if (!entry || !address || !length)
-@@ -15470,7 +15534,8 @@ int InitWlanBuffer88XX_V1(struct rtl8192cd_priv *priv)
+@@ -15470,7 +15536,8 @@ int InitWlanBuffer88XX_V1(struct rtl8192cd_priv *priv)
  			  GET_CHIP_VER(priv) == VERSION_8197G) &&
  			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_EMBEDDED))) ||
  			((GET_CHIP_VER(priv) == VERSION_8822B ||
@@ -549,7 +715,7 @@ index 90c8937..efc4f77 100755
  			 ((((priv->pshare->type >> TYPE_SHIFT) & TYPE_MASK) == TYPE_PCI_DIRECT)));
  		_GET_HAL_DATA(priv)->alloc_desc_txbd_addr = NULL;
  		_GET_HAL_DATA(priv)->alloc_desc_txbd_buf_size = 0;
-@@ -16781,9 +16846,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
+@@ -16781,9 +16848,11 @@ void *rtl8192cd_init_one(struct sdio_func *psdio_func, void *ent, struct _device
  			priv->pshare->linux6_radio_index = wdev->radio_index;
  			priv->pshare->linux6_root_priv = priv;
  			skb_queue_head_init(&priv->pshare->linux6_rx_delivery);
@@ -561,7 +727,7 @@ index 90c8937..efc4f77 100755
  			rtl8197f_wlan_phase_set(716, "probe-napi-add-entry", 0);
  			netif_napi_add_weight(dev, &priv->pshare->linux6_rx_napi,
  					rtl8192cd_linux6_napi_poll, 64);
-@@ -17855,6 +17922,8 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+@@ -17855,6 +17924,8 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
                  priv->pshare->version_id = VERSION_8197G;
                  DEBUG_INFO("\n found 8197G !!! \n");
                  REG32(0xB8000064)|= 0x1F;
@@ -570,7 +736,7 @@ index 90c8937..efc4f77 100755
                  //TODO
              }
  #endif // #if defined(CONFIG_WLAN_HAL_8197F) 
-@@ -18146,6 +18215,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
+@@ -18146,6 +18217,7 @@ if (GET_HCI_TYPE(priv) == RTL_HCI_PCIE) {
  	}
  #ifdef CONFIG_RTL8192CD_LINUX6_BUS
  linux6_irq_ready:
@@ -578,7 +744,7 @@ index 90c8937..efc4f77 100755
  #endif
  
  #ifdef CONFIG_PUMA_UDMA_SUPPORT
-@@ -18350,8 +18420,13 @@ register_driver:
+@@ -18350,8 +18422,14 @@ register_driver:
  		rtl8197f_wlan_phase_set(130, "netdev-register", 0);
  	rc = osk_register_netdev(dev);
  #else
@@ -590,10 +756,11 @@ index 90c8937..efc4f77 100755
 +#endif
  		rtl8197f_wlan_phase_set(130, "netdev-register", 0);
 +	}
++	netif_carrier_off(dev);
  	rc = register_netdev(dev);
  #endif
  
-@@ -20452,7 +20527,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
+@@ -20452,7 +20530,7 @@ static const struct net_device_ops rtl8192cd_rtl_pseudodev_ops = {
          .ndo_stop               = rtl8192cd_close,
          .ndo_set_mac_address    = rtl_pseudo_dev_set_hwaddr,
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -602,7 +769,7 @@ index 90c8937..efc4f77 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -20530,7 +20605,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
+@@ -20530,7 +20608,7 @@ static const struct net_device_ops rtl8192cd_pseudodev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_get_stats,
@@ -611,7 +778,7 @@ index 90c8937..efc4f77 100755
          .ndo_do_ioctl           = rtl8192cd_ioctl,
  #endif
          .ndo_start_xmit         = rtl8192cd_start_xmit,
-@@ -22818,7 +22893,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
+@@ -22818,7 +22896,7 @@ static const struct net_device_ops rtl8192cd_vdev_ops = {
  #endif
  #endif
          .ndo_get_stats          = rtl8192cd_vdev_get_stats,

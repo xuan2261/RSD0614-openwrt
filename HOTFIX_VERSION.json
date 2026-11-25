@@ -1,9 +1,9 @@
 {
-  "version": "5.6.3-m3-wifi-bringup-fixed-ramboot",
-  "base": "5.6.2-m3-wifi-mtu-hardened-ramboot",
-  "change": "Consolidated M3 dual-band Wi-Fi bring-up crash & runtime fix build resolving the v5.6.2 FillBeaconDesc88XX_V2 NULL dereference plus every downstream RTL8814BR (5 GHz), RTL8197G (2.4 GHz), AMSDU DMA, netifd/LuCI, and boot-delay blocker: (1) align RTL8814B 38-entry TXBD queue tables (TX_HIQ_NUM_8814B=20, HI16..HI19 in PrepareTXBD88XX_V1, InitHCIDMAReg88XX_V1, and DumpTxBDesc88XX) and check PrepareTXBDHandler return status so BCN_V2 (queue 37) never stays NULL; (2) fix MIPS32 unaligned u1Byte HIQ_En -> u2Byte HIQ_En in rtl8192cd_open, zero MAC-v4 ADDRCAM before InitMBIDCAMHandler with fixed bitmask precedence, send 5 GHz beacons at OFDM 6M (DATARATE=4) with intact TIM offset, and use wmb() for coherent KSEG1 BCN TXBD in SetBeaconDownload88XX; (3) fix coherent TX A-MSDU DMA addressing (ALIGN page base, populate desc_dma_buf_addr_amsdu[1..3], resolve through rtl8197f_wlan_tx_ring_dma via rsd0614_amsdu_txbd_dma) across BOTH RTL8814BR and RTL8197G; (4) fix RTL8197G 15-queue MappingTxQueue88XX / SendH2CPacket88XX / SetTxDescQSel88XX_V2, WPA2 CAMProgramEntry88XX_V1, SetRsvdPage88XX missing else, DownloadRsvdPage88XX wait_cnt=0, InitLLT_Table88XX_V1 polling, HIMR2/3 StopHW, and root rsnielen reset; (5) raise VG Port0/Port6 QPKTFCR to stock 0x00fc00ff for Wi-Fi<->LAN bridging bursts and hang_cnt>=25; (6) harden rtl8192cd.sh (2.4G HT40 offset, PSK/SSID validation, buffered VIF emit, dynamic band, country=US), fix LuCI Legacy htmode='NONE', and defer dropbear START=98 (eliminating 33s pre-network RSA keygen boot delay); all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v563-work",
-  "volume_label": "rsd0614.work=v5.6.3",
+  "version": "5.6.4-m3-router-hardened-ramboot",
+  "base": "5.6.3-m3-wifi-bringup-fixed-ramboot",
+  "change": "Consolidated M3 router-hardening RAM-boot build following the v5.6.3 physical hardware milestone (zero panic, full-MTU LuCI + SSH, both 5 GHz RTL8814BR & 2.4 GHz RTL8197G APs UP & forwarding, 5 GHz WPA2-PSK client associated at VHT NSS2-MCS9 780 Mbps with DHCP and 26.5 MiB free RAM): (1) close L2 WAN->LAN firewall bypass by clearing stale 4K CVLAN entries 0..31 (including VLAN 7 members=00ff untag=00ff) inside rtl8367b_setup() on RTL8367S, and declare ucidef_add_switch switch0 topology in 02_network so LuCI Network->Switch shows real ports 0..4 + 6t@eth0; (2) fix Wi-Fi client isolation (block_relay=1) by setting network.lan.multicast_to_unicast='0' and overriding _wireless_set_brsnoop_isolation in rtl8192cd.sh (keeping explicit UCI isolate authoritative), plus printf-safe SSID/PSK emit, explicit coexist=0/1, and wireless_set_retry 0; (3) fix WEXT/libiwinfo/LuCI wireless reporting (rtl_giwfreq real kHz, rtl_giwrange actual channel IDs & IW_MAX_FREQUENCIES clamp, rtl_giwrate VHT/HT rate decode, rtl_giwencode WPA2 NOKEY, new rtl_giwtxpow dBm handler, and RFC 2863 netif_carrier_on/off operstate) and expose rtl8192cd options (country, noscan, beacon_int, dtim_period, hidden, isolate, maxassoc) in LuCI wireless.js while hiding unsupported STA/Ad-Hoc/WEP modes; (4) enable software flow offloading (flow_offloading=1, flow_offloading_hw=0) and uhttpd-mod-lua; (5) fix UART diagnostic RX byte-stealing & mid-line n=512 noise (track consecutive unhandled IRQs only in 8250_dw.c) and silence 32x swnic new-rx/tx + 8x 8367S dump boot log spam; (6) add safe RAM-boot 3s Reset button handler (no jffs2reset), fix rsd0614-survey backslash escapes/BusyBox ip/iwpriv labels, and add read-only mtd0ro/mtd2ro flash-layout + SSH streaming backup-guide; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v564-work",
+  "volume_label": "rsd0614.work=v5.6.4",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -22,7 +22,8 @@
     "rsd0614-openwrt-v551-work",
     "rsd0614-openwrt-v560-work",
     "rsd0614-openwrt-v561-work",
-    "rsd0614-openwrt-v562-work"
+    "rsd0614-openwrt-v562-work",
+    "rsd0614-openwrt-v563-work"
   ],
   "persistent_flash": "NO-GO"
 }

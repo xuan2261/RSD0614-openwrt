@@ -310,8 +310,8 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;','netif_carrier_on(dev);','netif_carrier_off(dev);'):
         if token not in osdeptext:raise ValueError('v5.6.4 RTL8814B/WMAC/SET_NETDEV_DEV/HIQ_En/carrier hardening missing from compiled 8192cd_osdep.c: '+token)
     comapitext=comapisrc.read_text(errors='replace')
-    for token in ('int rtl_giwname(','int rtl_giwtxpow(','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY'):
-        if token not in comapitext:raise ValueError('v5.6.4 WEXT handler fix missing from compiled 8192cd_comapi.c: '+token)
+    for token in ('int rtl_giwname(','int rtl_giwtxpow(','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY','erq->length = 16;','memset(key, 0, 16);'):
+        if token not in comapitext:raise ValueError('v5.6.5 WEXT handler fix missing from compiled 8192cd_comapi.c: '+token)
     ioctltext=ioctlsrc.read_text(errors='replace')
     for token in ('(iw_handler) rtl_giwname,','(iw_handler) rtl_giwtxpow,'):
         if token not in ioctltext:raise ValueError('v5.6.4 WEXT ioctl wiring missing from compiled 8192cd_ioctl.c: '+token)

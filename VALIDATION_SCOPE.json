@@ -1,7 +1,7 @@
 {
-  "bundle_version": "5.6.4",
+  "bundle_version": "5.6.5",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 140,
+  "regression_tests_per_run": 141,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
@@ -17,11 +17,11 @@
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS (CI run 45723595834, 6m14s warm cache, 4221424 bytes / 0x004069F0, decoded_size 14629529 bytes / 13.95 MiB, SHA-256 a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb, deep_audit 32/32 PASS, rtl8192cd.ko undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B)",
-  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.4",
+  "openwrt_compile": "NOT YET RUN FOR v5.6.5",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.6.5",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.6.3 physical RAM-boot verified zero kernel panic, full-MTU LuCI web login + Dropbear SSH login, PCIe0 attempt 1/3 (LTSSM=0x03983311), RTL8367S 1552B max-frame persistence (reg1200=7fcb maxLen088c=0610), CPUICR=e4000000, MACCR=804a1485, both 5 GHz RTL8814BR (wlan0, ch 36 VHT80) & 2.4 GHz RTL8197G (wlan1, ch 6 HT20) APs UP & forwarding in br-lan with read-only /dev/mtd1 factory RF calibration (tgpwr=17/19 dBm), and real phone WPA2-PSK association on 5 GHz (VHT NSS2-MCS9 780 Mbps, tx_fail=0, 4-chain RSSI 79, DHCP 192.168.1.179, 26.5 MiB free RAM), while auditing and resolving stale switch0 4K CVLAN 7 WAN->LAN bypass, missing 02_network switch0 topology, brsnoop block_relay=1 client isolation, WEXT/LuCI display bugs, UART RX byte-stealing at n=512, 32x swnic boot spam, reset button safety, and survey escaping bugs in v5.6.4",
-  "preflight": "PASS (140/140 local & CI regression tests)",
-  "previous_build_result": "v5.6.3 run 45610643244: compile (6m21s warm cache), deep_audit (32/32 PASS), 4217008 bytes / 0x004058B0, decoded_size 14613145 bytes (13.94 MiB), SHA-256 16db41ef25aa915c025d57976adcf01971955578fb0252d4f9a4f55307186602, rtl8192cd.ko undef=157 missing=0 proc_init=1 giwname=1 bss=689152B"
+  "previous_hardware_result": "v5.6.4 physical RAM-boot verified zero panic, zero UART n=512 noise, zero swnic/8367S boot spam, stale switch0 VLAN 3..8 / VLAN 7 WAN->LAN bypass 100% eliminated (only VLAN 1 [4 6t] and VLAN 2 [0 1 2 3 6t]), FLOWOFFLOAD active in iptables FORWARD, block_relay=0 on both wlan0 & wlan1 with PC LAN-to-5G phone ping 4/4 (0% loss, avg 7ms), WEXT freq/rate/txpower/operstate UP (5.18 GHz 1.56 Gb/s 17 dBm & 2.437 GHz 130 Mb/s 19 dBm), LuCI login via uhttpd-mod-lua, 27.4 MiB free RAM, 5 GHz WPA2-PSK client (VHT NSS2-MCS9 780 Mbps, tx_fail=0, DHCP 192.168.1.179), and read-only mtd0ro/mtd2ro cr6c geometry (hdr_len=0x00256c02, 119/122 non-FF blocks), while 4-agent audit isolated disabled TX A-MPDU & Short GI (ampdu=0, shortGI*=0), silent non-US country overwrite back to US via map_country_to_reg(), iwconfig Encryption key:off (erq->length=0), and BusyBox tr/survey diagnostic gaps resolved in v5.6.5",
+  "preflight": "PENDING LOCAL & CI RUN",
+  "previous_build_result": "v5.6.4 run 45723595834: compile (6m14s warm cache), deep_audit (32/32 PASS), 4221424 bytes / 0x004069F0, decoded_size 14629529 bytes (13.95 MiB), SHA-256 a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb, rtl8192cd.ko undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B"
 }

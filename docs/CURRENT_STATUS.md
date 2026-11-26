@@ -67,27 +67,34 @@
     5. **Active UART RX byte-stealing (`n=512` mid-line `KERN_ERR`) & boot log spam**: `rtl8197f_diag_irq()` counted handled IRQs and read `UART_RX` before `serial8250_handle_irq()`; 32x `swnic new-rx/tx` and 8x `DIR842 8367Sdump` lines polluted `logread`.
     6. **Reset button safety & `rsd0614-survey` bugs**: base `/etc/rc.button/reset` had `jffs2reset` and rebooted on `<1s` taps; `rsd0614-survey` had unescaped `\n`/`\1`, BusyBox-incompatible `ip -s link show`, blank `driver=`, and unlabeled `iwpriv` output.
 
-## v5.6.4 scope — Consolidated Router-Hardened RAM-Boot (`v5.6.4-m3-router-hardened-ramboot`)
+- **v5.6.4 (`v5.6.4-m3-router-hardened-ramboot`) hardware-hardening milestone VERIFIED on physical Rock Space RSD0614 V1.0** (CI run `#45723595834`, `4,221,424` bytes / `0x004069F0`, `decoded_size=14,629,529` bytes / `13.95 MiB`, SHA-256 `a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb`):
+  - **Verified PASS on hardware**:
+    - Zero kernel panic/oops, zero UART `n=512` RX byte-stealing, zero `DIR842 8367Sdump` / `swnic new-rx/tx` boot spam, `PCIe0` attempt 1/3 (`LTSSM=0x0396b711`), `RTL8367S` `1552B` trunk max-frame persisted (`maxLen088c=0610`), `USEDDSC=18`, `runout=0`, `MemFree=28040 kB` (**`27.4 MiB` free RAM**).
+    - **Stale `switch0` `VLAN 3..8` / `VLAN 7` WAN->LAN L2 bypass 100% CLOSED**: only `VLAN 1` (`4 6t`, `members=0050`, `untag=0010`) and `VLAN 2` (`0 1 2 3 6t`, `members=004f`, `untag=000f`) remain.
+    - **Software Flow Offloading ACTIVE**: `xt_FLOWOFFLOAD flowtable registered` and `iptables FORWARD` carries `-j FLOWOFFLOAD` (`flow_offloading=1`, `flow_offloading_hw=0`).
+    - **Wi-Fi Client Isolation FIXED (`block_relay=0`)** on both `wlan0` and `wlan1`, and PC wired LAN -> 5 GHz phone `ping 192.168.1.179` passed `4/4` (`0%` loss, `3–19 ms`, avg `7 ms`).
+    - **WEXT / `iwconfig` / `operstate` & LuCI**: `wlan0` (`state=up`, `IEEE 802.11anac`, `5.18 GHz`, `1.56 Gb/s`, `17 dBm`) & `wlan1` (`state=up`, `IEEE 802.11bgn`, `2.437 GHz`, `130 Mb/s`, `19 dBm`), LuCI login via `uhttpd-mod-lua`, clean `ubus` redaction (`"key": "REDACTED"`), and read-only `mtd0ro`/`mtd2ro` audit (`cr6c` `hdr_len=0x00256c02`, `119/122` non-FF 64 KiB blocks, `mtd2ro_tail32=ffff...`).
+  - **Remaining 4 concrete issues audited from `v5.6.4` serial log & fixed in `v5.6.5`**:
+    1. **TX A-MPDU & Short GI disabled on BOTH radios**: `8192cd_ioctl.c` defaults `ampdu=0` and `shortGI{20,40,80}M=0`; `rtl8192cd.sh` did not emit them, leaving `wlan0` in `aggre mthd: AMSDU` (`AMSDU_AMPDU_support: 0`, 780 Mbps LGI) and `wlan1` in `AGGRE_MTHD_NONE` (zero aggregation, 130 Mbps LGI).
+    2. **Non-US `country` silently overwritten back to `US` (`regdomain=1`)**: `map_country_to_reg()` reads `dot11CountryString` (default `"US"`) whenever `country2reg=1`, overwriting `regdomain` unless `rtl8192cd.sh` emits `countrystr` / `country2reg`.
+    3. **`iwconfig` printed `Encryption key:off` on WPA2-PSK APs**: `wireless-tools` `iwconfig.c` prints `off` whenever `erq->length == 0`, even with `IW_ENCODE_NOKEY`.
+    4. **Diagnostic & M4 read-only flash-layout gaps**: BusyBox `tr` (`FEATURE_TR_CLASSES=n`) broke `tr -cd '[:print:]'` (`mtd0ro_tokens=none`), `mtd2ro` 64 KiB-only scan missed the non-64K-aligned rootfs start after `cr6c` (`0x256c12`), `WIFI_DMESG` dropped `rtl8822b_pci` `factory RF: radio=0`, `pgrep -a` truncated `uhttpd` args, `brctl showmacs` is unsupported in BusyBox, and `/proc/bus/input/devices` is absent under OpenWrt's `kmod-gpio-button-hotplug`.
 
-Consolidates every fix uncovered by the 4-agent audit of `v5.6.3` hardware logs into one RAM-boot build:
-- **L2 switch security & clean boot logs (`patches/9996-rsd0614-vg-rgmii-and-pcie.patch`, `harden_source.py`)**:
-  - Adds `rtl8367s_clear_stale_vlans()` in `rtl8367b_setup()` zeroing 4K CVLAN entries `0..31` on `RTL8367S` (closing the stale `VLAN 7` WAN->LAN L2 bypass), downgrades `DIR842 8367Sdump` `printk(KERN_ERR)` to `pr_debug()`, and gates 32x `swnic new-rx/tx` logs behind `pid_dump > 0` at `pr_info()`.
-  - Adds `ucidef_add_switch "switch0" "4:wan" "0:lan" "1:lan" "2:lan" "3:lan" "6t@eth0"` in `etc/board.d/02_network` so LuCI `Network -> Switch` renders exact physical ports and CPU port `6t@eth0`.
-- **Wi-Fi client-to-client LAN, WEXT/LuCI parity & performance (`patches/rtl8192cd-4.14-rsd0614.patch`, `harden_source.py`, `build-rsd0614-initramfs.sh`, `seed-rsd0614-initramfs.config`)**:
-  - Sets `network.lan.multicast_to_unicast='0'` in `99-rsd0614-network` and overrides `_wireless_set_brsnoop_isolation() { return 0; }` in `rtl8192cd.sh` (plus `printf`-safe SSID/PSK emit, explicit `coexist=0/1`, and `wireless_set_retry 0`).
-  - Fixes `rtl_giwfreq`, `rtl_giwrange`, `rtl_giwrate`, `rtl_giwencode`, adds `rtl_giwtxpow` wired to `SIOCGIWTXPOW`, and adds RFC 2863 `netif_carrier_off`/`netif_carrier_on` in `8192cd_osdep.c`.
-  - Extends LuCI `wireless.js` for `rtl8192cd` (`country`, `noscan`, `beacon_int`, `dtim_period`, `hidden`, `isolate`, `maxassoc`) and hides unsupported STA/Ad-Hoc/WEP modes.
-  - Enables software flow offloading (`firewall.@defaults[0].flow_offloading='1'`, `flow_offloading_hw='0'`) and `uhttpd-mod-lua` (~12 KiB uncompressed, eliminating CGI fork latency).
-- **UART fix, safe Reset button & upgraded `rsd0614-survey` (`patches/9998zz-rtl8197f-uart-register-semantics.patch`, `harden_source.py`)**:
-  - Moves `rtl8197f_diag_irq()` to the unhandled-only path and resets `d->diag_total = 0` on handled IRQs, eliminating mid-line `n=512` noise and RX byte-stealing while preserving unhandled-storm diagnostics.
-  - Installs RAM-boot safe `etc/rc.button/reset` (zero `jffs2reset`, ignores `<3s` taps, reboots cleanly on `>= 3s` hold).
-  - Fixes `rsd0614-survey` backslash escaping, BusyBox `ip link`/`/proc/net/dev`/`brctl showmacs`/`ip route`/`iptables -t nat -S`/`/proc/bus/input/devices`, `driver=none`, labeled `iwpriv`, and adds strictly read-only `flash-layout` (`mtd0ro` & `mtd2ro` only) + workstation-side SSH streaming `backup-guide`.
+## v5.6.5 scope — Final M3 Wi-Fi Performance, Regulatory & Read-Only Survey RAM-Boot (`v5.6.5-m3-final-ramboot`)
+
+- **Wi-Fi TX A-MPDU, Short GI & Regulatory Country (`harden_source.py` -> `/lib/netifd/wireless/rtl8192cd.sh`)**:
+  - Emits `ampdu=1`, `shortGI20M=1`, `shortGI40M=1`, and `shortGI80M=1` (on 5 GHz `phy_band=2`), unlocking full 802.11ac/n TX A-MPDU Block-Ack (`ADDBA`) + Short GI (`866.7 Mbps` 2×2 VHT80 / `1.73 Gb/s` 4×4 VHT80 / `144.5 Mb/s` 2×2 HT20) on both radios.
+  - Aligns `rtl_country_to_regdomain()` with `8192cd_11h.c` `countryIEArray` (`CN=13`, `TW=11`, `RU=12`, `IL=7`, `JP=6`, FCC=`1`, ETSI=`3`) and adds `rtl_emit_country()` emitting `countrystr` + `country2reg=1` for 2-letter ISO codes (`country2reg=0` for `00`/`EU`/numeric) so non-US countries (`VN`, `EU`, `JP`, `CN`, `TW`, etc.) take effect cleanly.
+- **WEXT `iwconfig` WPA2 Display Fix (`patches/rtl8192cd-4.14-rsd0614.patch`)**:
+  - Sets `erq->length = 16; if (key) memset(key, 0, 16);` alongside `IW_ENCODE_ENABLED | IW_ENCODE_NOKEY | IW_ENCODE_RESTRICTED` in `rtl_giwencode()` so `iwconfig` shows masked WPA2 encryption instead of `off`.
+- **Fixed `rsd0614-survey` (`diag` & read-only `flash-layout`)**:
+  - Replaces `tr -cd '[:print:]'` with `tr -cd '\040-\176\n'`, adds dynamic read-only `cr6c_end` (`16 + hdr_len`) 32-byte inspection + `4 KiB` stride scan + erased 64 KiB block list + final non-`0xFF` block tail on `mtd2ro` (zero bytes read from `cfg`/`cpe`/`cfm`/`cfm_backup`), shows `uhttpd` `ps w` args, `rtl8822b`/`factory RF` dmesg, `iwpriv` `ampdu`/`shortGI*`/`countrystr`/`regdomain`, `br-lan` `multicast_to_unicast`, and `gpio_button_hotplug` + `/sys/kernel/debug/gpio` Reset status.
 - **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` stays disabled, unverified LED GPIOs stay unclaimed, and persistent flash remains **NO-GO**.
 
 ## Verification boundary
 
-- v5.3.9..v5.6.3 `ttyS0`, `spi0` `BH25Q64` read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, `1552B` `reg1200=7fcb maxLen088c=0610`), `RTL8197FH-VG` 6-dword `eth0`, `PCIe0` attempt 1/3 (`10ec:b814`), full-MTU LuCI + SSH, both 5 GHz (`RTL8814BR`) & 2.4 GHz (`RTL8197G`) APs UP & forwarding, and 5 GHz WPA2-PSK client (`780 Mbps`, DHCP, `tx_fail=0`, `26.5 MiB` free RAM) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
-- v5.6.4 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` / `giwtxpow` audit & `deep_audit.py`: **PASS** (CI run `#45723595834`, `6m14s`, `4,221,424` bytes / `0x004069F0`, `decoded_size=14,629,529` bytes / `13.95 MiB`, SHA-256 `a3ff06729e93d1fe0ae03feecae95249e51e7624a96d7bd7f8048490646ce5bb`, `32/32` offline policy checks PASS, `rtl8192cd.ko` `undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B`, `uhttpd_lua.so=8463B`).
-- v5.6.4 physical hardware verification (clean `VLAN 1/2`-only `switch0`, LuCI Switch + Wireless UI, `block_relay=0` STA-to-STA ping, 2.4 GHz client WPA2/DHCP, WAN port 4 NAT + software flow offloading, `iperf3`, `rsd0614-survey diag` & `flash-layout`): **NOT YET VERIFIED FOR v5.6.4**.
+- v5.3.9..v5.6.4 `ttyS0` (0 `n=512` noise), `spi0` `BH25Q64` 6 read-only MTDs, `GPIO1_4` Reset button, `RTL8367S` (`smi_pefgh_24_23`, 1000M/FD, `1552B` `reg1200=7fcb maxLen088c=0610`, clean `VLAN 1/2`-only switch0), `RTL8197FH-VG` 6-dword `eth0`, `PCIe0` attempt 1/3 (`10ec:b814`), full-MTU LuCI (`uhttpd-mod-lua`) + SSH, `FLOWOFFLOAD` filter wiring, both 5 GHz (`RTL8814BR`) & 2.4 GHz (`RTL8197G`) APs UP & forwarding (`block_relay=0`, WEXT freq/rate/txpow/operstate), PC LAN -> 5 GHz WPA2-PSK phone ping (`7 ms`, `780 Mbps`, `tx_fail=0`, `27.4 MiB` free RAM) on physical RSD0614 V1.0: **PASS (VERIFIED)**.
+- v5.6.5 CI OpenWrt compile, ELF `__ksymtab` / `proc_init` / `giwname` / `giwtxpow` audit & `deep_audit.py`: **PENDING CI RUN**.
+- v5.6.5 physical hardware verification (TX A-MPDU + Short GI `866.7 Mbps` / `1.73 Gb/s` / `144.5 Mb/s`, `iwconfig` masked WPA2, non-US `country`, 2.4 GHz STA WPA2/DHCP, WAN port 4 NAT + `FLOWOFFLOAD`, `iperf3`, Reset button `<3s` vs `>=3s`, `rsd0614-survey diag` & `flash-layout` non-64K rootfs offset): **NOT YET VERIFIED FOR v5.6.5**.
 - Disabled board peripherals (`pcie1`, LEDs): **NOT YET VERIFIED**.
 - Persistent flash: **NO-GO**.

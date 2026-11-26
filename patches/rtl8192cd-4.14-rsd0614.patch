@@ -194,14 +194,16 @@ index cce51db..26381f9 100644
  
      return 0;
  }
-@@ -1705,8 +1773,36 @@ int rtl_giwencode(struct net_device *dev,
+@@ -1705,8 +1773,38 @@ int rtl_giwencode(struct net_device *dev,
  	else if (priv->pmib->dot1180211AuthEntry.dot11PrivacyAlgrthm == _NO_PRIVACY_) {
  		erq->length = 0;
  		erq->flags = IW_ENCODE_DISABLED;
 -	} 
 -	
 +	} else {
-+		erq->length = 0;
++		erq->length = 16;
++		if (key)
++			memset(key, 0, 16);
 +		erq->flags = IW_ENCODE_ENABLED | IW_ENCODE_NOKEY | IW_ENCODE_RESTRICTED;
 +	}
 +
@@ -233,7 +235,7 @@ index cce51db..26381f9 100644
  	return 0;
  }
  
-@@ -3620,24 +3716,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
+@@ -3620,24 +3718,19 @@ int CfgFileRead(struct net_device *dev, char *buf)
  	int ret = 0;
  
  	oldfs = get_fs();
@@ -262,7 +264,7 @@ index cce51db..26381f9 100644
  
  err_close:
  	filp_close(fp, NULL);
-@@ -3713,13 +3804,16 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3713,13 +3806,16 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		return -1;
  	}
  	
@@ -280,7 +282,7 @@ index cce51db..26381f9 100644
  		return -1;
  	}
  	
-@@ -3731,7 +3825,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3731,7 +3827,7 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  		//int i=0;
  		
  		memset(cmd_buf, 0, MAX_PARAM_BUF_SIZE);
@@ -289,7 +291,7 @@ index cce51db..26381f9 100644
  		memset(valstr, 0, MAX_PARAM_BUF_SIZE);
  		
  		line_head = next_head;
-@@ -3748,6 +3842,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3748,6 +3844,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  #ifdef VENDOR_PARAM_COMPATIBLE	
  		/* To compatible with other vendor's parameters, each parameter must have its own process function - chris*/
  		loc = strchr(mibstart, '=');
@@ -298,7 +300,7 @@ index cce51db..26381f9 100644
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - miblen -1;
  		if (vallen>0) {			
-@@ -3770,6 +3866,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3770,6 +3868,8 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			continue;
  		
  		loc = strchr(mibstart, '=');
@@ -307,7 +309,7 @@ index cce51db..26381f9 100644
  		miblen = (u32)loc - (u32)mibstart;
  		vallen = len - (strlen(dev->name)+1) - (miblen+1);
  		
-@@ -3777,8 +3875,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
+@@ -3777,8 +3877,12 @@ int CfgFileSetMib(struct net_device *dev, char *buf)
  			
  			ret = set_mib(priv, mibstart);
  			if (ret < 0) {

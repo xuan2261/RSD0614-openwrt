@@ -222,7 +222,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtw88','rtl8822be')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.4-m3-router-hardened-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.5-m3-final-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
     boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net');rstbtn_sh=byname.get('etc/rc.button/reset')
     check('rsd0614-wired-network-config',
           b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
@@ -250,6 +250,11 @@ def audit(image):
           wifish is not None and stat.S_ISREG(wifish['mode']) and (wifish['mode']&0o777)==0o755 and
           b'init_wireless_driver' in wifish['data'] and b'add_driver rtl8192cd' in wifish['data'] and
           b'_wireless_set_brsnoop_isolation() { return 0; }' in wifish['data'] and
+          b'${phy_ifname}_ampdu=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI20M=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI40M=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI80M=1' in wifish['data'] and
+          b'rtl_emit_country' in wifish['data'] and
           b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and
           b'/sys/class/net/' in wifish['data'] and b'mib_all' not in wifish['data'] and
           b'HT40+|VHT40+) echo 2' in wifish['data'] and
@@ -277,7 +282,7 @@ def audit(image):
     check('rtl8192cd-elf-ksymtab-and-bss-guard',ko_ok,ko_detail)
     check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
     survey=byname.get('usr/sbin/rsd0614-survey')
-    check('omnibus-survey-tool-executable',survey is not None and stat.S_ISREG(survey['mode']) and (survey['mode']&0o777)==0o755 and survey['data'].startswith(b'#!/bin/sh\n') and b'/proc/rsd0614_hw_survey' in survey['data'] and b'print_net' in survey['data'] and b'print_flash_layout' in survey['data'] and b'/dev/mtdblock' not in survey['data'])
+    check('omnibus-survey-tool-executable',survey is not None and stat.S_ISREG(survey['mode']) and (survey['mode']&0o777)==0o755 and survey['data'].startswith(b'#!/bin/sh\n') and b'/proc/rsd0614_hw_survey' in survey['data'] and b'print_net' in survey['data'] and b'print_flash_layout' in survey['data'] and b'[:print:]' not in survey['data'] and b'mtd2ro_cr6c_end=' in survey['data'] and b'BUTTON_HOTPLUG_AND_GPIO' in survey['data'] and b'/dev/mtdblock' not in survey['data'])
     auto_survey=[n for n in byname if (n.startswith(('etc/rc.d/','etc/init.d/')) and 'survey' in n.lower()) or (n.startswith(('lib/preinit/','etc/init.d/')) and b'rsd0614-survey' in byname[n].get('data',b'')) or (n=='etc/rc.local' and b'rsd0614-survey' in byname[n].get('data',b''))]
     check('omnibus-survey-no-auto-exec',not auto_survey,', '.join(auto_survey))
     check('kernel-omnibus-survey-proc-nodes',b'rsd0614_hw_survey\0' in payload and b'rsd0614_probe\0' in payload)

@@ -233,7 +233,7 @@ print_flash_layout() {
 	if [ -c /dev/mtd0ro ]; then
 		m0_first="$(dd if=/dev/mtd0ro bs=16 count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" "\\n"' || true)"
 		printf "mtd0ro_first16=%s\\n" "${m0_first:-unavailable}"
-		tokens="$(dd if=/dev/mtd0ro bs=65536 count=2 2>/dev/null | tr -cd '[:print:]\\n' | grep -Eo 'cr6c|cs6c|r6cr|80a00000|81000000|BH25Q64|RTL8197F-VG|AUTOBURN' | sort -u | tr '\\n' ' ' || true)"
+		tokens="$(dd if=/dev/mtd0ro bs=65536 count=2 2>/dev/null | tr -cd '\\040-\\176\\n' | grep -Eo 'cr6c|cs6c|r6cr|80a00000|81000000|BH25Q64|RTL8197F-VG|AUTOBURN' | sort -u | tr '\\n' ' ' || true)"
 		printf "mtd0ro_tokens=%s\\n" "${tokens:-none}"
 	else
 		echo "mtd0ro=device_absent"
@@ -246,24 +246,60 @@ print_flash_layout() {
 		blocks=$(( m2_size / 65536 ))
 		step=0
 		non_ff=0
+		last_non_ff=-1
+		ff_blocks=""
 		while [ "$step" -lt "$blocks" ]; do
 			m4="$(dd if=/dev/mtd2ro bs=4 skip=$(( step * 16384 )) count=1 2>/dev/null | hexdump -v -e '4/1 "%02x" "\\n"' || true)"
 			off=$(( step * 65536 ))
 			case "$m4" in
-				68737173) printf "block=%03d off=0x%06x magic=hsqs(squashfs-le)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				73717368) printf "block=%03d off=0x%06x magic=sqsh(squashfs-be)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				72366372) printf "block=%03d off=0x%06x magic=r6cr(rtk-rootfs)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				726f6f74) printf "block=%03d off=0x%06x magic=root\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				63723663) printf "block=%03d off=0x%06x magic=cr6c(rtk-kernel)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				63733663) printf "block=%03d off=0x%06x magic=cs6c(rtk-cfg)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				deadc0de) printf "block=%03d off=0x%06x magic=deadc0de(jffs2-eof)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				19852003) printf "block=%03d off=0x%06x magic=19852003(jffs2)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )) ;;
-				ffffffff|"") ;;
-				*) non_ff=$(( non_ff + 1 )) ;;
+				68737173) printf "block=%03d off=0x%06x magic=hsqs(squashfs-le)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				73717368) printf "block=%03d off=0x%06x magic=sqsh(squashfs-be)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				72366372) printf "block=%03d off=0x%06x magic=r6cr(rtk-rootfs)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				726f6f74) printf "block=%03d off=0x%06x magic=root\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				63723663) printf "block=%03d off=0x%06x magic=cr6c(rtk-kernel)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				63733663) printf "block=%03d off=0x%06x magic=cs6c(rtk-cfg)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				deadc0de) printf "block=%03d off=0x%06x magic=deadc0de(jffs2-eof)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				19852003) printf "block=%03d off=0x%06x magic=19852003(jffs2)\\n" "$step" "$off"; non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
+				ffffffff|"") ff_blocks="${ff_blocks}${ff_blocks:+ }${step}" ;;
+				*) non_ff=$(( non_ff + 1 )); last_non_ff=$step ;;
 			esac
 			step=$(( step + 1 ))
 		done
-		printf "mtd2ro_blocks_total=%d mtd2ro_blocks_non_ff=%d\\n" "$blocks" "$non_ff"
+		printf "mtd2ro_blocks_total=%d mtd2ro_blocks_non_ff=%d mtd2ro_last_non_ff_block=%d mtd2ro_ff_blocks=%s\\n" "$blocks" "$non_ff" "$last_non_ff" "${ff_blocks:-none}"
+		case "$m2_hdr" in
+			63723663????????????????????????)
+				hdr_hex="${m2_hdr#????????????????????????}"
+				hdr_len=$(( 0x$hdr_hex ))
+				cr6c_end=$(( 16 + hdr_len ))
+				cr6c_align4=$(( (cr6c_end + 3) & ~3 ))
+				printf "mtd2ro_cr6c_end=0x%06x(%d) align4=0x%06x\\n" "$cr6c_end" "$cr6c_end" "$cr6c_align4"
+				if [ "$cr6c_end" -ge 2 ] && [ $(( cr6c_end + 30 )) -le "$m2_size" ]; then
+					end32="$(dd if=/dev/mtd2ro bs=1 skip=$(( cr6c_end - 2 )) count=32 2>/dev/null | hexdump -v -e '16/1 "%02x" " "' || true)"
+					printf "mtd2ro_cr6c_end_m2_32=%s\\n" "${end32:-unavailable}"
+				fi
+				scan_off=$(( cr6c_end & ~4095 ))
+				scan_end=$(( scan_off + 65536 ))
+				[ "$scan_end" -gt "$m2_size" ] && scan_end="$m2_size"
+				while [ $(( scan_off + 4 )) -le "$scan_end" ]; do
+					s4="$(dd if=/dev/mtd2ro bs=4 skip=$(( scan_off / 4 )) count=1 2>/dev/null | hexdump -v -e '4/1 "%02x" "\\n"' || true)"
+					case "$s4" in
+						68737173) printf "scan4k off=0x%06x magic=hsqs(squashfs-le)\\n" "$scan_off" ;;
+						73717368) printf "scan4k off=0x%06x magic=sqsh(squashfs-be)\\n" "$scan_off" ;;
+						72366372) printf "scan4k off=0x%06x magic=r6cr(rtk-rootfs)\\n" "$scan_off" ;;
+						726f6f74) printf "scan4k off=0x%06x magic=root\\n" "$scan_off" ;;
+						63723663) printf "scan4k off=0x%06x magic=cr6c(rtk-kernel)\\n" "$scan_off" ;;
+						63733663) printf "scan4k off=0x%06x magic=cs6c(rtk-cfg)\\n" "$scan_off" ;;
+						deadc0de) printf "scan4k off=0x%06x magic=deadc0de(jffs2-eof)\\n" "$scan_off" ;;
+						19852003) printf "scan4k off=0x%06x magic=19852003(jffs2)\\n" "$scan_off" ;;
+					esac
+					scan_off=$(( scan_off + 4096 ))
+				done
+				;;
+		esac
+		if [ "$last_non_ff" -ge 0 ]; then
+			lnf_tail="$(dd if=/dev/mtd2ro bs=32 skip=$(( (last_non_ff + 1) * 2048 - 1 )) count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" " "' || true)"
+			printf "mtd2ro_last_non_ff_tail32=%s\\n" "${lnf_tail:-unavailable}"
+		fi
 		if [ "$m2_size" -ge 32 ]; then
 			tail32="$(dd if=/dev/mtd2ro bs=32 skip=$(( m2_size / 32 - 1 )) count=1 2>/dev/null | hexdump -v -e '16/1 "%02x" " "' || true)"
 			printf "mtd2ro_tail32=%s\\n" "${tail32:-unavailable}"
@@ -304,11 +340,7 @@ print_wifi() {
 	else
 		echo "RTL8192CD.dat=missing"
 	fi
-	if command -v pgrep >/dev/null 2>&1; then
-		pgrep -a uhttpd 2>/dev/null || echo "uhttpd=not_running"
-	else
-		ps w 2>/dev/null | grep -E '[u]httpd' || echo "uhttpd=not_running"
-	fi
+	ps w 2>/dev/null | grep -E '[u]httpd' || echo "uhttpd=not_running"
 	if command -v iwconfig >/dev/null 2>&1; then
 		echo "=== IWCONFIG ==="
 		iwconfig 2>&1 || true
@@ -317,7 +349,7 @@ print_wifi() {
 		echo "=== IWPRIV_NONSECRET ==="
 		for iface in wlan0 wlan1; do
 			[ -d "/sys/class/net/$iface" ] || continue
-			for mib in channel band phyBandSelect use40M 2ndchoffset block_relay encmode psk_enable; do
+			for mib in channel band phyBandSelect use40M 2ndchoffset ampdu shortGI20M shortGI40M shortGI80M countrystr regdomain block_relay encmode psk_enable; do
 				val="$(iwpriv "$iface" get_mib "$mib" 2>/dev/null | sed -E 's/^.*get_mib:[[:space:]]*//' | tr '\\n' ' ' | sed 's/[[:space:]]*$//')"
 				[ -n "$val" ] && printf "%s %s=%s\\n" "$iface" "$mib" "$val"
 			done
@@ -350,7 +382,7 @@ print_wifi() {
 	echo "=== WIFI_INTERRUPTS ==="
 	grep -Ei 'wlan|wifi|rtl8192|pcie|wmac' /proc/interrupts 2>/dev/null || true
 	echo "=== WIFI_DMESG ==="
-	dmesg | grep -Ei 'rtl8192cd|rtl8197f[-_](wlan|soc)|rtl8197g|8814|realtek-pci|pcie|wlan[01]|CfgFile|board-data|tenda-kv|calibration|rfe_type' | tail -n 80 || true
+	dmesg | grep -Ei 'rtl8192cd|rtl8822b|rtl8197f[-_](wlan|soc)|rtl8197g|8197G|8814|realtek-pci|pcie|wlan[01]|CfgFile|board-data|tenda-kv|calibration|factory RF|rfe_type' | tail -n 80 || true
 }
 
 print_net() {
@@ -362,7 +394,13 @@ print_net() {
 	ip -4 addr show 2>/dev/null || ifconfig 2>/dev/null || true
 	ip link show 2>/dev/null || true
 	cat /proc/net/dev 2>/dev/null || true
-	brctl showmacs br-lan 2>/dev/null || true
+	echo "=== NET_BRIDGE_MCAST_TO_UCAST ==="
+	printf "uci_lan_multicast_to_unicast=%s\\n" "$(uci -q get network.lan.multicast_to_unicast 2>/dev/null || echo unset)"
+	for mp in /sys/class/net/br-lan/brif/*/multicast_to_unicast; do
+		[ -r "$mp" ] || continue
+		miface="$(basename "$(dirname "$mp")")"
+		printf "br-lan/%s multicast_to_unicast=%s\\n" "$miface" "$(cat "$mp" 2>/dev/null || echo ?)"
+	done
 	echo "=== NET_ROUTES_AND_NAT ==="
 	ip route 2>/dev/null || true
 	iptables -t nat -S 2>/dev/null || true
@@ -372,8 +410,9 @@ print_net() {
 	netstat -lntup 2>/dev/null || netstat -lntu 2>/dev/null || true
 	echo "=== NET_FIREWALL_FILTER ==="
 	iptables -S 2>/dev/null | head -n 120 || true
-	echo "=== INPUT_DEVICES ==="
-	cat /proc/bus/input/devices 2>/dev/null || true
+	echo "=== BUTTON_HOTPLUG_AND_GPIO ==="
+	grep -E 'gpio_button_hotplug|gpio-keys' /proc/modules 2>/dev/null || echo "gpio_button_hotplug=not_in_proc_modules"
+	grep -i 'reset' /sys/kernel/debug/gpio 2>/dev/null || true
 	echo "=== NET_WIRELESS_UBUS_SANITIZED ==="
 	if command -v ubus >/dev/null 2>&1; then
 		ubus call network.wireless status 2>/dev/null | sed -E 's/("key"[[:space:]]*:[[:space:]]*)"[^"]*"/\\1"REDACTED"/g' || true
@@ -538,11 +577,36 @@ rtl_derive_band() {
 
 rtl_country_to_regdomain() {
 	case "$1" in
-		""|US|CA|TW) echo 1 ;;
-		EU|DE|GB|FR|VN|CN|SG|AU) echo 3 ;;
+		""|US|CA|CO|DO|GT|MX|PA|PR|UZ) echo 1 ;;
 		JP) echo 6 ;;
+		IL) echo 7 ;;
+		TW) echo 11 ;;
+		RU) echo 12 ;;
+		CN) echo 13 ;;
+		00|EU|[A-Z][A-Z]) echo 3 ;;
 		*[!0-9]*) echo 1 ;;
 		*) echo "$1" ;;
+	esac
+}
+
+rtl_emit_country() {
+	local p="$1" cc="$2" regdom="$3"
+	echo "${p}_regdomain=$regdom"
+	case "$cc" in
+		"")
+			echo "${p}_countrystr=US"
+			echo "${p}_country2reg=1"
+			;;
+		00|EU|*[!A-Z]*)
+			echo "${p}_country2reg=0"
+			;;
+		[A-Z][A-Z])
+			printf '%s=%s\\n' "${p}_countrystr" "$cc"
+			echo "${p}_country2reg=1"
+			;;
+		*)
+			echo "${p}_country2reg=0"
+			;;
 	esac
 }
 
@@ -704,7 +768,7 @@ drv_rtl8192cd_setup() {
 	local devname="$1"
 	local phy_ifname _rtl_vifs="" FRAGFILE
 	local channel htmode country hwmode band phy_band phy macaddr
-	local beacon_int dtim_period noscan regdom v
+	local beacon_int dtim_period noscan cc regdom v
 
 	json_select config
 	json_get_vars channel htmode country hwmode band phy_band phy macaddr beacon_int dtim_period noscan
@@ -736,7 +800,8 @@ drv_rtl8192cd_setup() {
 	if [ -z "$band" ]; then
 		band="$(rtl_derive_band "$phy_band" "$htmode")"
 	fi
-	regdom="$(rtl_country_to_regdomain "$country")"
+	cc="$(printf '%s' "$country" | tr 'a-z' 'A-Z')"
+	regdom="$(rtl_country_to_regdomain "$cc")"
 	FRAGFILE="$CFGDIR/radio_${phy_ifname}.dat"
 
 	mkdir -p "$CFGDIR"
@@ -746,10 +811,14 @@ drv_rtl8192cd_setup() {
 
 	{
 		echo "${phy_ifname}_band=$band"
-		echo "${phy_ifname}_regdomain=$regdom"
+		rtl_emit_country "$phy_ifname" "$cc" "$regdom"
 		echo "${phy_ifname}_channel=$channel"
 		echo "${phy_ifname}_use40M=$(rtl_htmode_to_use40m "$htmode")"
 		echo "${phy_ifname}_2ndchoffset=$(rtl_htmode_to_offset "$htmode" "$phy_band" "$channel")"
+		echo "${phy_ifname}_ampdu=1"
+		echo "${phy_ifname}_shortGI20M=1"
+		echo "${phy_ifname}_shortGI40M=1"
+		[ "$phy_band" = "2" ] && echo "${phy_ifname}_shortGI80M=1"
 		echo "${phy_ifname}_bcnint=${beacon_int:-100}"
 		echo "${phy_ifname}_dtimperiod=${dtim_period:-1}"
 		if [ "${noscan:-0}" = "1" ]; then
@@ -924,7 +993,7 @@ if [ "$ACTION" = "released" ]; then
 fi
 exit 0
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.4-m3-router-hardened-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.button/reset':RC_BUTTON_RESET,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.5-m3-final-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.button/reset':RC_BUTTON_RESET,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)

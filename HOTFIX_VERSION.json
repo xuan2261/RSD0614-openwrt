@@ -1,9 +1,9 @@
 {
-  "version": "5.6.4-m3-router-hardened-ramboot",
-  "base": "5.6.3-m3-wifi-bringup-fixed-ramboot",
-  "change": "Consolidated M3 router-hardening RAM-boot build following the v5.6.3 physical hardware milestone (zero panic, full-MTU LuCI + SSH, both 5 GHz RTL8814BR & 2.4 GHz RTL8197G APs UP & forwarding, 5 GHz WPA2-PSK client associated at VHT NSS2-MCS9 780 Mbps with DHCP and 26.5 MiB free RAM): (1) close L2 WAN->LAN firewall bypass by clearing stale 4K CVLAN entries 0..31 (including VLAN 7 members=00ff untag=00ff) inside rtl8367b_setup() on RTL8367S, and declare ucidef_add_switch switch0 topology in 02_network so LuCI Network->Switch shows real ports 0..4 + 6t@eth0; (2) fix Wi-Fi client isolation (block_relay=1) by setting network.lan.multicast_to_unicast='0' and overriding _wireless_set_brsnoop_isolation in rtl8192cd.sh (keeping explicit UCI isolate authoritative), plus printf-safe SSID/PSK emit, explicit coexist=0/1, and wireless_set_retry 0; (3) fix WEXT/libiwinfo/LuCI wireless reporting (rtl_giwfreq real kHz, rtl_giwrange actual channel IDs & IW_MAX_FREQUENCIES clamp, rtl_giwrate VHT/HT rate decode, rtl_giwencode WPA2 NOKEY, new rtl_giwtxpow dBm handler, and RFC 2863 netif_carrier_on/off operstate) and expose rtl8192cd options (country, noscan, beacon_int, dtim_period, hidden, isolate, maxassoc) in LuCI wireless.js while hiding unsupported STA/Ad-Hoc/WEP modes; (4) enable software flow offloading (flow_offloading=1, flow_offloading_hw=0) and uhttpd-mod-lua; (5) fix UART diagnostic RX byte-stealing & mid-line n=512 noise (track consecutive unhandled IRQs only in 8250_dw.c) and silence 32x swnic new-rx/tx + 8x 8367S dump boot log spam; (6) add safe RAM-boot 3s Reset button handler (no jffs2reset), fix rsd0614-survey backslash escapes/BusyBox ip/iwpriv labels, and add read-only mtd0ro/mtd2ro flash-layout + SSH streaming backup-guide; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v564-work",
-  "volume_label": "rsd0614.work=v5.6.4",
+  "version": "5.6.5-m3-final-ramboot",
+  "base": "5.6.4-m3-router-hardened-ramboot",
+  "change": "Final M3 RAM-boot polish following v5.6.4 physical hardware verification (zero panic, stale VLAN 7 closed, FLOWOFFLOAD active, block_relay=0 + PC-to-5G ping 7ms, WEXT frequency/bitrate/txpower/operstate UP, LuCI login, 27.4 MiB free RAM, 0 UART n=512 noise): (1) enable TX A-MPDU Block-Ack (ampdu=1) and Short GI (shortGI20M=1, shortGI40M=1, shortGI80M=1 on 5 GHz) in rtl8192cd.sh — fixing both wlan0 (previously AMSDU-only LGI) and wlan1 (previously AGGRE_MTHD_NONE LGI); (2) fix regulatory country handling (rtl_country_to_regdomain aligned to 8192cd_11h.c countryIEArray + rtl_emit_country emitting countrystr and country2reg=1/0) so non-US countries (VN/CN/TW/JP/EU/00) are never silently overwritten back to US by map_country_to_reg(); (3) fix rtl_giwencode() WPA2 branch (erq->length = 16; memset(key, 0, 16); IW_ENCODE_NOKEY) so iwconfig displays masked encryption instead of off; (4) fix rsd0614-survey BusyBox tr class bug (\\040-\\176), add non-64K cr6c-end + 4KiB read-only mtd2ro scanner for M4 geometry discovery, show uhttpd ps args, radio0 factory RF dmesg, iwpriv ampdu/shortGI/country MIBs, br-lan multicast_to_unicast, and gpio-button-hotplug status; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v565-work",
+  "volume_label": "rsd0614.work=v5.6.5",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -23,7 +23,8 @@
     "rsd0614-openwrt-v560-work",
     "rsd0614-openwrt-v561-work",
     "rsd0614-openwrt-v562-work",
-    "rsd0614-openwrt-v563-work"
+    "rsd0614-openwrt-v563-work",
+    "rsd0614-openwrt-v564-work"
   ],
   "persistent_flash": "NO-GO"
 }

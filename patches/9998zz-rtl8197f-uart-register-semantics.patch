@@ -126,7 +126,25 @@
  		return;
  
  	d->diag_total++;
-@@ -343,7 +398,7 @@
+@@ -315,8 +370,6 @@
+ 	unsigned int status;
+ 	unsigned long flags;
+ 
+-	rtl8197f_diag_irq(p, d, iir);
+-
+ 	/*
+ 	 * There are ways to get Designware-based UARTs into a state where
+ 	 * they are asserting UART_IIR_RX_TIMEOUT but there is no actual
+@@ -337,19 +390,24 @@
+ 		spin_unlock_irqrestore(&p->lock, flags);
+ 	}
+ 
+-	if (serial8250_handle_irq(p, iir))
++	if (serial8250_handle_irq(p, iir)) {
++		d->diag_total = 0;
+ 		return 1;
++	}
+ 
  	if ((iir & UART_IIR_BUSY) == UART_IIR_BUSY) {
  		/* Clear the USR */
  		(void)p->serial_in(p, d->usr_reg);
@@ -135,7 +153,16 @@
  			writel(d->last_lcr,
  			       p->membase + (UART_LCR << p->regshift));
  
-@@ -452,13 +507,30 @@
++		d->diag_total = 0;
+ 		return 1;
+ 	}
+ 
++	rtl8197f_diag_irq(p, d, iir);
++
+ 	return 0;
+ }
+ 
+@@ -452,13 +510,30 @@
  		}
  #endif
  		if (of_device_is_compatible(np, "realtek,rtl8197f-uart")) {

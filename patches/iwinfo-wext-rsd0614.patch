@@ -1,0 +1,653 @@
+diff --git a/iwinfo_wext.h b/iwinfo_wext.h
+index 6896450..c762e1a 100644
+--- a/iwinfo_wext.h
++++ b/iwinfo_wext.h
+@@ -377,6 +377,7 @@ static const unsigned int standard_event_num =
+ #define	IW_IE_CYPHER_NUM	8
+ #define	IW_IE_KEY_MGMT_NUM	3
+ 
++const char *wext_resolve_ifname(const char *ifname, char *buf, size_t buflen);
+ int wext_get_scanlist(const char *ifname, char *buf, int *len);
+ 
+ #endif
+diff --git a/iwinfo_wext.c b/iwinfo_wext.c
+index ee02f3a..e2364b9 100644
+--- a/iwinfo_wext.c
++++ b/iwinfo_wext.c
+@@ -42,12 +42,72 @@ static inline int wext_freq2mhz(const struct iw_freq *in)
+ 	}
+ }
+ 
++static int wext_valid_ifname(const char *name)
++{
++	const char *p;
++
++	if (!name || !name[0] || strlen(name) >= IFNAMSIZ)
++		return 0;
++
++	for (p = name; *p; p++)
++	{
++		if (*p == '/' || (*p == '.' && p[1] == '.'))
++			return 0;
++	}
++
++	return 1;
++}
++
++const char *wext_resolve_ifname(const char *ifname, char *buf, size_t buflen)
++{
++	struct uci_section *s;
++	const char *phy;
++	char sysfs[64];
++
++	if (!ifname || !buf || buflen < IFNAMSIZ)
++		return ifname ? ifname : "";
++
++	if (!strncmp(ifname, "mon.", 4))
++		ifname += 4;
++
++	if (wext_valid_ifname(ifname))
++	{
++		snprintf(sysfs, sizeof(sysfs), "/sys/class/net/%s", ifname);
++		if (!access(sysfs, F_OK))
++		{
++			snprintf(buf, buflen, "%s", ifname);
++			return buf;
++		}
++	}
++
++	s = iwinfo_uci_get_radio(ifname, "rtl8192cd");
++	if (s)
++	{
++		phy = uci_lookup_option_string(uci_ctx, s, "phy");
++		if (phy && wext_valid_ifname(phy))
++		{
++			snprintf(buf, buflen, "%s", phy);
++			return buf;
++		}
++	}
++
++	if (!strncmp(ifname, "radio", 5) && isdigit((unsigned char)ifname[5]))
++	{
++		snprintf(buf, buflen, "wlan%s", ifname + 5);
++		return buf;
++	}
++
++	snprintf(buf, buflen, "%s", ifname);
++	return buf;
++}
++
+ static inline int wext_ioctl(const char *ifname, int cmd, struct iwreq *wrq)
+ {
+-	if( !strncmp(ifname, "mon.", 4) )
+-		strncpy(wrq->ifr_name, &ifname[4], IFNAMSIZ);
+-	else
+-		strncpy(wrq->ifr_name, ifname, IFNAMSIZ);
++	char resolved[IFNAMSIZ];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++
++	memset(wrq->ifr_name, 0, IFNAMSIZ);
++	strncpy(wrq->ifr_name, real_if, IFNAMSIZ - 1);
+ 
+ 	return iwinfo_ioctl(cmd, wrq);
+ }
+@@ -65,7 +125,7 @@ static int wext_probe(const char *ifname)
+ 
+ static void wext_close(void)
+ {
+-	/* Nop */
++	iwinfo_uci_free();
+ }
+ 
+ static int wext_get_mode(const char *ifname, int *buf)
+@@ -251,7 +311,8 @@ static int wext_get_signal(const char *ifname, int *buf)
+ 	wrq.u.data.length  = sizeof(struct iw_statistics);
+ 	wrq.u.data.flags   = 1;
+ 
+-	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0)
++	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0 &&
++	   !(stats.qual.updated & IW_QUAL_LEVEL_INVALID))
+ 	{
+ 		*buf = (stats.qual.updated & IW_QUAL_DBM)
+ 			? (stats.qual.level - 0x100) : stats.qual.level;
+@@ -271,7 +332,8 @@ static int wext_get_noise(const char *ifname, int *buf)
+ 	wrq.u.data.length  = sizeof(struct iw_statistics);
+ 	wrq.u.data.flags   = 1;
+ 
+-	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0)
++	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0 &&
++	   !(stats.qual.updated & IW_QUAL_NOISE_INVALID))
+ 	{
+ 		*buf = (stats.qual.updated & IW_QUAL_DBM)
+ 			? (stats.qual.noise - 0x100) : stats.qual.noise;
+@@ -291,7 +353,8 @@ static int wext_get_quality(const char *ifname, int *buf)
+ 	wrq.u.data.length  = sizeof(struct iw_statistics);
+ 	wrq.u.data.flags   = 1;
+ 
+-	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0)
++	if(wext_ioctl(ifname, SIOCGIWSTATS, &wrq) >= 0 &&
++	   !(stats.qual.updated & IW_QUAL_QUAL_INVALID))
+ 	{
+ 		*buf = stats.qual.qual;
+ 		return 0;
+@@ -318,10 +381,221 @@ static int wext_get_quality_max(const char *ifname, int *buf)
+ 	return -1;
+ }
+ 
++static void wext_parse_rtl_rate(const char *val, struct iwinfo_rate_entry *re)
++{
++	int nss = 0, mcs = 0;
++	double mbps = 0.0;
++	const char *p = val;
++
++	while (*p == ' ' || *p == '\t')
++		p++;
++
++	if (!strncmp(p, "VHT NSS", 7))
++	{
++		char sgi = 0;
++		if (sscanf(p, "VHT NSS%d-MCS%d%c %lf", &nss, &mcs, &sgi, &mbps) >= 3)
++		{
++			re->is_vht = 1;
++			re->nss = (uint8_t)nss;
++			re->mcs = (int8_t)mcs;
++			if (sgi == 's')
++			{
++				re->is_short_gi = 1;
++			}
++			else
++			{
++				/* No 's' suffix: re-parse mbps directly after MCS%d */
++				sscanf(p, "VHT NSS%d-MCS%d %lf", &nss, &mcs, &mbps);
++			}
++			if (mbps > 0.0)
++				re->rate = (uint32_t)(mbps * 1000.0 + 0.5);
++		}
++	}
++	else if (!strncmp(p, "MCS", 3))
++	{
++		if (sscanf(p, "MCS%d %lf", &mcs, &mbps) >= 1)
++		{
++			re->is_ht = 1;
++			re->mcs = (int8_t)mcs;
++			if (mbps > 0.0)
++				re->rate = (uint32_t)(mbps * 1000.0 + 0.5);
++		}
++	}
++	else if (sscanf(p, "%lf", &mbps) == 1 && mbps > 0.0)
++	{
++		re->rate = (uint32_t)(mbps * 1000.0 + 0.5);
++	}
++}
++
++static void wext_parse_rtl_bw(const char *val, struct iwinfo_rate_entry *re)
++{
++	unsigned int bw = 0;
++
++	if (sscanf(val, "%u", &bw) == 1 && bw <= 160)
++	{
++		re->mhz = (uint8_t)bw;
++		re->is_40mhz = (bw == 40) ? 1 : 0;
++	}
++}
++
++static int wext_parse_rtl_sta_info_file(FILE *f, char *buf, int *len)
++{
++	char line[256];
++	struct iwinfo_assoclist_entry cur;
++	int have_cur = 0;
++	int have_mac = 0;
++	int outlen = 0;
++
++	memset(&cur, 0, sizeof(cur));
++
++	while (fgets(line, sizeof(line), f))
++	{
++		char *p = line;
++		unsigned int uval = 0;
++
++		while (*p == ' ' || *p == '\t')
++			p++;
++
++		if (strstr(p, ": stat_info..."))
++		{
++			if (have_cur && have_mac &&
++			    (outlen + (int)sizeof(cur)) <= IWINFO_BUFSIZE)
++			{
++				memcpy(buf + outlen, &cur, sizeof(cur));
++				outlen += (int)sizeof(cur);
++			}
++			memset(&cur, 0, sizeof(cur));
++			cur.noise = -95;
++			cur.rx_rate.mcs = -1;
++			cur.tx_rate.mcs = -1;
++			cur.is_authenticated = 1;
++			cur.is_authorized = 1;
++			have_cur = 1;
++			have_mac = 0;
++			continue;
++		}
++
++		if (!have_cur)
++			continue;
++
++		if (!strncmp(p, "hwaddr:", 7))
++		{
++			unsigned int m[6];
++			const char *q = p + 7;
++			while (*q == ' ' || *q == '\t')
++				q++;
++			if (sscanf(q, "%02x:%02x:%02x:%02x:%02x:%02x",
++			           &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6 ||
++			    sscanf(q, "%02x%02x%02x%02x%02x%02x",
++			           &m[0], &m[1], &m[2], &m[3], &m[4], &m[5]) == 6)
++			{
++				int i;
++				for (i = 0; i < 6; i++)
++					cur.mac[i] = (uint8_t)m[i];
++				have_mac = 1;
++			}
++		}
++		else if (!strncmp(p, "rssi:", 5))
++		{
++			if (sscanf(p + 5, "%u", &uval) == 1)
++			{
++				if (uval > 100)
++					uval = 100;
++				cur.signal = (int8_t)((int)uval - 100);
++				cur.signal_avg = cur.signal;
++			}
++		}
++		else if (!strncmp(p, "tx_bytes:", 9))
++		{
++			if (sscanf(p + 9, "%u", &uval) == 1)
++				cur.tx_bytes = uval;
++		}
++		else if (!strncmp(p, "rx_bytes:", 9))
++		{
++			if (sscanf(p + 9, "%u", &uval) == 1)
++				cur.rx_bytes = uval;
++		}
++		else if (!strncmp(p, "tx_pkts:", 8))
++		{
++			if (sscanf(p + 8, "%u", &uval) == 1)
++				cur.tx_packets = uval;
++		}
++		else if (!strncmp(p, "rx_pkts:", 8))
++		{
++			if (sscanf(p + 8, "%u", &uval) == 1)
++				cur.rx_packets = uval;
++		}
++		else if (!strncmp(p, "tx_fail:", 8))
++		{
++			if (sscanf(p + 8, "%u", &uval) == 1)
++				cur.tx_failed = uval;
++		}
++		else if (!strncmp(p, "idle_time:", 10))
++		{
++			if (sscanf(p + 10, "%u", &uval) == 1)
++				cur.inactive = uval * 1000;
++		}
++		else if (!strncmp(p, "link_time:", 10))
++		{
++			if (sscanf(p + 10, "%u", &uval) == 1)
++				cur.connected_time = uval;
++		}
++		else if (!strncmp(p, "current_tx_rate:", 16))
++		{
++			wext_parse_rtl_rate(p + 16, &cur.tx_rate);
++		}
++		else if (!strncmp(p, "current_rx_rate:", 16))
++		{
++			wext_parse_rtl_rate(p + 16, &cur.rx_rate);
++		}
++		else if (!strncmp(p, "rx_rate:", 8))
++		{
++			wext_parse_rtl_rate(p + 8, &cur.rx_rate);
++		}
++		else if (!strncmp(p, "current_tx_BW:", 14))
++		{
++			wext_parse_rtl_bw(p + 14, &cur.tx_rate);
++		}
++		else if (!strncmp(p, "tx_bw:", 6) && !cur.tx_rate.mhz)
++		{
++			wext_parse_rtl_bw(p + 6, &cur.tx_rate);
++		}
++		else if (!strncmp(p, "rx_bw:", 6))
++		{
++			wext_parse_rtl_bw(p + 6, &cur.rx_rate);
++		}
++	}
++
++	if (have_cur && have_mac &&
++	    (outlen + (int)sizeof(cur)) <= IWINFO_BUFSIZE)
++	{
++		memcpy(buf + outlen, &cur, sizeof(cur));
++		outlen += (int)sizeof(cur);
++	}
++
++	*len = outlen;
++	return 0;
++}
++
+ static int wext_get_assoclist(const char *ifname, char *buf, int *len)
+ {
+-	/* Stub */
+-	return -1;
++	char resolved[IFNAMSIZ];
++	char path[64];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++	FILE *f;
++	int rv;
++
++	if (!wext_valid_ifname(real_if))
++		return -1;
++
++	snprintf(path, sizeof(path), "/proc/%s/sta_info", real_if);
++	f = fopen(path, "r");
++	if (!f)
++		return -1;
++
++	rv = wext_parse_rtl_sta_info_file(f, buf, len);
++	fclose(f);
++	return rv;
+ }
+ 
+ static int wext_get_txpwrlist(const char *ifname, char *buf, int *len)
+@@ -399,8 +673,10 @@ static int wext_get_freqlist(const char *ifname, char *buf, int *len)
+ 
+ static int wext_get_country(const char *ifname, char *buf)
+ {
+-	sprintf(buf, "00");
+-	return 0;
++	(void)ifname;
++	(void)buf;
++	/* Let LuCI fall back to UCI wireless.radioX.country instead of hardcoding 00 */
++	return -1;
+ }
+ 
+ static int wext_get_countrylist(const char *ifname, char *buf, int *len)
+@@ -411,12 +687,32 @@ static int wext_get_countrylist(const char *ifname, char *buf, int *len)
+ 
+ static int wext_get_hwmodelist(const char *ifname, int *buf)
+ {
++	struct iwreq wrq;
+ 	char chans[IWINFO_BUFSIZE] = { 0 };
+ 	struct iwinfo_freqlist_entry *e = NULL;
+ 	int len = 0;
+ 
+ 	*buf = 0;
+ 
++	if( wext_ioctl(ifname, SIOCGIWNAME, &wrq) >= 0 )
++	{
++		const char *p = strstr(wrq.u.name, "802.11");
++		if (p)
++		{
++			p += 6;
++			if (strstr(p, "ac"))
++				*buf |= IWINFO_80211_AC;
++			if (strchr(p, 'a'))
++				*buf |= IWINFO_80211_A;
++			if (strchr(p, 'b'))
++				*buf |= IWINFO_80211_B;
++			if (strchr(p, 'g'))
++				*buf |= IWINFO_80211_G;
++			if (strchr(p, 'n'))
++				*buf |= IWINFO_80211_N;
++		}
++	}
++
+ 	if( !wext_get_freqlist(ifname, chans, &len) )
+ 	{
+ 		for( e = (struct iwinfo_freqlist_entry *)chans; e->channel; e++ )
+@@ -431,35 +727,177 @@ static int wext_get_hwmodelist(const char *ifname, int *buf)
+ 				*buf |= IWINFO_80211_A;
+ 			}
+ 		}
+-
+-		return 0;
+ 	}
+ 
+-	return -1;
++	return (*buf != 0) ? 0 : -1;
+ }
+ 
+ static int wext_get_htmodelist(const char *ifname, int *buf)
+ {
+-	/* Stub */
++	int hwmodes = 0;
++
++	*buf = 0;
++	if (wext_get_hwmodelist(ifname, &hwmodes) < 0)
++		return -1;
++
++	if (hwmodes & IWINFO_80211_N)
++		*buf |= IWINFO_HTMODE_HT20 | IWINFO_HTMODE_HT40;
++	if (hwmodes & IWINFO_80211_AC)
++		*buf |= IWINFO_HTMODE_VHT20 | IWINFO_HTMODE_VHT40 | IWINFO_HTMODE_VHT80;
++
++	return (*buf != 0) ? 0 : -1;
++}
++
++static int wext_get_htmode(const char *ifname, int *buf)
++{
++	(void)ifname;
++	(void)buf;
+ 	return -1;
+ }
+ 
+-static int wext_get_encryption(const char *ifname, char *buf)
++static int wext_get_survey(const char *ifname, char *buf, int *len)
+ {
+-	/* No reliable crypto info in wext */
++	(void)ifname;
++	(void)buf;
++	(void)len;
+ 	return -1;
+ }
+ 
++static int wext_parse_rtl_mib_auth_file(FILE *f, struct iwinfo_crypto_entry *c)
++{
++	char line[256];
++	int privacy = -1, psk = 0, wpa_c = 0, wpa2_c = 0, dot1x = 0, auth_alg = 0;
++
++	memset(c, 0, sizeof(*c));
++
++	while (fgets(line, sizeof(line), f))
++	{
++		char *p = line;
++		int val = 0;
++
++		while (*p == ' ' || *p == '\t')
++			p++;
++
++		if (!strncmp(p, "dot11PrivacyAlgrthm:", 20) && sscanf(p + 20, "%d", &val) == 1)
++			privacy = val;
++		else if (!strncmp(p, "dot11AuthAlgrthm:", 17) && sscanf(p + 17, "%d", &val) == 1)
++			auth_alg = val;
++		else if (!strncmp(p, "dot11EnablePSK:", 15) && sscanf(p + 15, "%d", &val) == 1)
++			psk = val;
++		else if (!strncmp(p, "dot11WPACipher:", 15) && sscanf(p + 15, "%d", &val) == 1)
++			wpa_c = val;
++		else if (!strncmp(p, "dot11WPA2Cipher:", 16) && sscanf(p + 16, "%d", &val) == 1)
++			wpa2_c = val;
++		else if (!strncmp(p, "dot118021xAlgrthm:", 18) && sscanf(p + 18, "%d", &val) == 1)
++			dot1x = val;
++	}
++
++	if (privacy < 0)
++		return -1;
++
++	if (privacy == 0 && psk == 0)
++	{
++		c->enabled = 0;
++		return 0;
++	}
++
++	c->enabled = 1;
++	if (psk & 3)
++	{
++		int cmask = 0;
++		c->wpa_version = (uint8_t)(psk & 3);
++		c->auth_suites = dot1x ? IWINFO_KMGMT_8021x : IWINFO_KMGMT_PSK;
++		if (psk & 1)
++			cmask |= wpa_c;
++		if (psk & 2)
++			cmask |= wpa2_c;
++		if (cmask & 2)
++		{
++			c->pair_ciphers |= IWINFO_CIPHER_TKIP;
++			c->group_ciphers |= IWINFO_CIPHER_TKIP;
++		}
++		if (cmask & 8)
++		{
++			c->pair_ciphers |= IWINFO_CIPHER_CCMP;
++			c->group_ciphers |= IWINFO_CIPHER_CCMP;
++		}
++		if (!c->pair_ciphers)
++		{
++			if (privacy == 2)
++				c->pair_ciphers = c->group_ciphers = IWINFO_CIPHER_TKIP;
++			else
++				c->pair_ciphers = c->group_ciphers = IWINFO_CIPHER_CCMP;
++		}
++	}
++	else if (privacy == 1 || privacy == 5)
++	{
++		c->pair_ciphers = c->group_ciphers = (privacy == 5) ? IWINFO_CIPHER_WEP104 : IWINFO_CIPHER_WEP40;
++		c->auth_algs = (auth_alg == 1) ? IWINFO_AUTH_SHARED : IWINFO_AUTH_OPEN;
++	}
++
++	return 0;
++}
++
++static int wext_get_encryption(const char *ifname, char *buf)
++{
++	char resolved[IFNAMSIZ];
++	char path[64];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++	FILE *f;
++	int rv;
++
++	if (!wext_valid_ifname(real_if))
++		return -1;
++
++	snprintf(path, sizeof(path), "/proc/%s/mib_auth", real_if);
++	f = fopen(path, "r");
++	if (!f)
++		return -1;
++
++	rv = wext_parse_rtl_mib_auth_file(f, (struct iwinfo_crypto_entry *)buf);
++	fclose(f);
++	return rv;
++}
++
+ static int wext_get_phyname(const char *ifname, char *buf)
+ {
+-	/* No suitable api in wext */
+-	strcpy(buf, ifname);
++	char resolved[IFNAMSIZ];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++
++	strncpy(buf, real_if, IFNAMSIZ - 1);
++	buf[IFNAMSIZ - 1] = '\0';
++	return 0;
++}
++
++static int wext_lookup_phy(const char *section, char *buf)
++{
++	char resolved[IFNAMSIZ];
++	const char *real_if = wext_resolve_ifname(section, resolved, sizeof(resolved));
++
++	if (!wext_probe(real_if))
++		return -1;
++
++	strncpy(buf, real_if, IFNAMSIZ - 1);
++	buf[IFNAMSIZ - 1] = '\0';
+ 	return 0;
+ }
+ 
+ static int wext_get_mbssid_support(const char *ifname, int *buf)
+ {
+-	/* No multi bssid support atm */
++	char resolved[IFNAMSIZ];
++	char path[64];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++
++	if (wext_valid_ifname(real_if))
++	{
++		snprintf(path, sizeof(path), "/sys/class/net/%s-va0", real_if);
++		if (!access(path, F_OK))
++		{
++			*buf = 1;
++			return 0;
++		}
++	}
++
+ 	return -1;
+ }
+ 
+@@ -467,9 +905,14 @@ static char * wext_sysfs_ifname_file(const char *ifname, const char *path)
+ {
+ 	FILE *f;
+ 	static char buf[128];
++	char resolved[IFNAMSIZ];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
+ 	char *rv = NULL;
+ 
+-	snprintf(buf, sizeof(buf), "/sys/class/net/%s/%s", ifname, path);
++	if (!wext_valid_ifname(real_if))
++		return NULL;
++
++	snprintf(buf, sizeof(buf), "/sys/class/net/%s/%s", real_if, path);
+ 
+ 	if ((f = fopen(buf, "r")) != NULL)
+ 	{
+@@ -546,6 +989,7 @@ const struct iwinfo_ops wext_ops = {
+ 	.mbssid_support   = wext_get_mbssid_support,
+ 	.hwmodelist       = wext_get_hwmodelist,
+ 	.htmodelist       = wext_get_htmodelist,
++	.htmode           = wext_get_htmode,
+ 	.mode             = wext_get_mode,
+ 	.ssid             = wext_get_ssid,
+ 	.bssid            = wext_get_bssid,
+@@ -559,5 +1003,7 @@ const struct iwinfo_ops wext_ops = {
+ 	.scanlist         = wext_get_scanlist,
+ 	.freqlist         = wext_get_freqlist,
+ 	.countrylist      = wext_get_countrylist,
++	.survey           = wext_get_survey,
++	.lookup_phy       = wext_lookup_phy,
+ 	.close            = wext_close
+ };
+diff --git a/iwinfo_wext_scan.c b/iwinfo_wext_scan.c
+index 1d7ec16..5ea959a 100644
+--- a/iwinfo_wext_scan.c
++++ b/iwinfo_wext_scan.c
+@@ -25,7 +25,11 @@
+ 
+ static int wext_ioctl(const char *ifname, int cmd, struct iwreq *wrq)
+ {
+-	strncpy(wrq->ifr_name, ifname, IFNAMSIZ - 1);
++	char resolved[IFNAMSIZ];
++	const char *real_if = wext_resolve_ifname(ifname, resolved, sizeof(resolved));
++
++	memset(wrq->ifr_name, 0, IFNAMSIZ);
++	strncpy(wrq->ifr_name, real_if, IFNAMSIZ - 1);
+ 	return iwinfo_ioctl(cmd, wrq);
+ }
+ 
+@@ -294,7 +298,13 @@ static inline void wext_fill_entry(struct stream_descr *stream, struct iw_event
+ 
+ 		case SIOCGIWESSID:
+ 			if( event->u.essid.pointer && event->u.essid.length && event->u.essid.flags )
+-				memcpy(e->ssid, event->u.essid.pointer, event->u.essid.length);
++			{
++				size_t slen = event->u.essid.length;
++				if( slen > IWINFO_ESSID_MAX_SIZE )
++					slen = IWINFO_ESSID_MAX_SIZE;
++				memcpy(e->ssid, event->u.essid.pointer, slen);
++				e->ssid[slen] = '\0';
++			}
+ 
+ 			break;
+ 

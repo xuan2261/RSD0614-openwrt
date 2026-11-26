@@ -1,26 +1,27 @@
 {
-  "bundle_version": "5.3.9",
+  "bundle_version": "5.7.0",
   "original_failure": "REPRODUCED_ON_LIBLZMA_5.2.2",
-  "regression_tests_per_run": 119,
+  "regression_tests_per_run": 142,
   "failures": 0,
   "errors": 0,
   "skipped": 0,
-  "tested_python": "3.12.3 (GitHub Actions preflight)",
+  "tested_python": "3.12.16 (Cloud VM Ubuntu 24.04) & 3.9.2 (pinned Debian Bullseye builder)",
   "tested_linked_liblzma": [
     "5.2.2",
-    "5.8.1",
-    "5.4.5"
+    "5.2.5",
+    "5.4.5",
+    "5.8.1"
   ],
   "test_uid1000": "PASS",
   "production_decoder_unchanged": true,
   "build_fingerprint_unchanged": false,
   "powershell_docker": "NOT YET VERIFIED",
   "exact_user_python_lib_versions": "NOT YET VERIFIED",
-  "openwrt_compile": "PASS on GitHub Actions run 45026415476 (commit 221aae12593f5b86aaa4d68e514ea82b1ddd1ade, sha256 e8199f3abde18b91c460df6eef265218226e33fb6bbad2a3fb09b1219ad65768, size 2928560, offline structural audit PASS 24/24, ELF _end 0x809e31d0)",
-  "hardware_runtime": "PASS on physical Rock Space RSD0614 V1.0 (AUTOBURN 0, LOADADDR 81000000, size 0x2CAFB0; soc_id=0x81970001 mode=vg-std tx_reg=0 rx_reg=0 adjlcr=0; ttyS0 16550A TX/RX handoff and interactive OpenWrt ash shell verified; /proc/interrupts irq17=102, ERR=0, sheipa_spi_init=-19)",
+  "openwrt_compile": "PASS (CI run 45850489679, 7m33s warm cache, commit 9b61ecb, deep_audit 32/32 PASS, 4142576 bytes / 0x003f35f0, decoded_size 14368249 bytes / 13.703 MiB [2.297 MiB headroom], SHA-256 a03fe0204761dbd11b929a3eef78bc4bb80eb3625caec7aac8c7fa12c1fc824a, rtl8192cd.ko undef=156 missing=0 proc_init=1 giwname=1 giwtxpow=1 wstats=1 nat25=1 bss=694560B)",
+  "hardware_runtime": "NOT YET VERIFIED FOR v5.7.0",
   "ram_boot_authorized": false,
   "persistent_flash": "NO-GO",
-  "previous_hardware_result": "v5.3.7 on RTL8197FH-VG: early0 outputs normally via dynamic 0xB8000000 SoC-ID check, while ttyS0 had silent TX and RX timeout storm (441/512, lsr=61, rbr=00, iir=cc->rx:cc, lcr=13) because 0004 forced non-VG tx_reg/rx_reg=9 (+0x24) and adjlcr=true onto RTL8197FH-VG (0x81970000, standard +0x00)",
-  "preflight": "PASS on GitHub Actions run 45031113801",
-  "previous_build_result": "v5.3.8 run 36808678578: compile and offline structural audit passed, but retained static +0x24/adjlcr semantics incompatible with RTL8197FH-VG (0x81970000) and translated LCR after MMIO write"
+  "previous_hardware_result": "v5.6.4 physical RAM-boot verified zero panic, zero UART n=512 noise, zero swnic/8367S boot spam, stale switch0 VLAN 3..8 / VLAN 7 WAN->LAN bypass 100% eliminated (only VLAN 1 [4 6t] and VLAN 2 [0 1 2 3 6t]), FLOWOFFLOAD active in iptables FORWARD, block_relay=0 on both wlan0 & wlan1 with PC LAN-to-5G phone ping 4/4 (0% loss, avg 7ms), WEXT freq/rate/txpower/operstate UP (5.18 GHz 1.56 Gb/s 17 dBm & 2.437 GHz 130 Mb/s 19 dBm), LuCI login via uhttpd-mod-lua, 27.4 MiB free RAM, 5 GHz WPA2-PSK client (VHT NSS2-MCS9 780 Mbps, tx_fail=0, DHCP 192.168.1.179), and read-only mtd0ro/mtd2ro cr6c geometry (hdr_len=0x00256c02, 119/122 non-FF blocks)",
+  "preflight": "PASS (CI run 45850471288, 142/142)",
+  "previous_build_result": "v5.6.5 run 45827182660: compile (6m18s warm cache), deep_audit (32/32 PASS), 4221200 bytes / 0x00406910, decoded_size 14633113 bytes (13.955 MiB), SHA-256 d1a22aac2d25851aa84d6227aa7f4080cd57f4d27c5eca78f9a00251267216a2, rtl8192cd.ko undef=159 missing=0 proc_init=1 giwname=1 giwtxpow=1 bss=689152B"
 }

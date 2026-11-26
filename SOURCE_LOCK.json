@@ -3,13 +3,19 @@
   "donor_commit": "229536d89c25a676417717304fcef386a53a7875",
   "base_repo": "ggbruno/openwrt",
   "base_commit": "8a0ccb93f3431bcf8f5c5d03d4acc2c8e442de67",
+  "wifi_driver_repo": "tobyw121/Openwrt_RTL",
+  "wifi_driver_commit": "1529557b0936019462c4b24f98bc8436d359bd3a",
+  "luci_feed_repo": "openwrt/luci",
+  "luci_feed_commit": "f25285a6c26e8776f153994704710cb8e51fad91",
+  "packages_feed_repo": "openwrt/packages",
+  "packages_feed_commit": "6df6880800397ab3821572c6c5ad18e300374d9e",
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.3.9",
+  "bundle_version": "5.7.0",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "serial-only RAM validation candidate; keep_bootcon enabled; v5.3.9 dispatches RTL8197F DW8250 quirks at runtime from realtek,rtl819x-sysc SoC ID so RTL8197FH-VG (0x81970000) uses standard 16550/DW-APB RBR/THR +0x00 and unmodified LCR/DLL/DLM while non-VG RTL8197F (0x8197F000) uses RX/TX index 9, pre-write composite LCR WLEN translation and raw DLL/DLM divisor callbacks, preserving UPF_SHARE_IRQ|UPF_FIXED_PORT, v5.3.6 BUSY replay and v5.3.7 bounded IRQ diagnostics; SPI/PCIe/WMAC/Ethernet disabled; direct NET/PCIe/WiFi IRQs masked and pending cleared; all enabled auto mount_root paths suppressed; default eth0/eth1 synthesis suppressed; no donor target userspace"
+  "intent": "M3 full router + Wi-Fi Repeater + Multi-SSID RAM-only candidate (v5.7.0-m3-full-router-repeater-ramboot): consolidates all 4-agent audit fixes on top of v5.6.5 while preserving all 5 pinned commits — enables rtl8192cd CLIENT_MODE + UNIVERSAL_REPEATER (wlanX-vxd) + VXD_DIFF_MAC + MBSSID (wlanX-va0) with 8814B/8197G ADDRCAM/StopHW88XX/NAPI-close/NAT2.5/WEXT scan & stats fixes, adds libiwinfo WEXT compat patch (radioN->wlanN, rpcd-safe .htmode/.survey/.lookup_phy, /proc/<ifname>/sta_info & mib_auth parsing), upgrades netifd rtl8192cd.sh (AP, routed WISP STA, relayd, auto-NAT2.5 bridged STA, Same-Band Universal Repeater, Guest Multi-SSID), fixes LuCI wireless.js Join Network is_sae bug and enables Client/auto-channel UX, adds relayd + luci-proto-relay + iwinfo CLI + zero-risk kernel diet, and fixes rtl819x-eth.c runt TX eth_skb_pad(); all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, persistent flash stays NO-GO"
 }

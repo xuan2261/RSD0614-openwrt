@@ -169,7 +169,7 @@ def audit(image):
     def check(name,ok,detail=''):checks.append({'check':name,'pass':bool(ok),'detail':detail})
     check('target-compatible',b'rockspace,rsd0614\0' in tree['/'].get('compatible',b''));check('target-model',tree['/'].get('model')==b'Rock Space RSD0614 V1.0\0')
     memories=[p for p in tree.values() if p.get('device_type')==b'memory\0'];check('64MiB-memory',len(memories)==1 and memories[0].get('reg')==struct.pack('>II',0,0x4000000))
-    check('UART-115200-initcall-debug-keep-bootcon',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200 initcall_debug ignore_loglevel keep_bootcon\0')
+    check('UART-115200-clean',tree.get('/chosen',{}).get('bootargs')==b'console=ttyS0,115200\0')
     uart=tree.get('/serial@18147000',{})
     uart_compat=uart.get('compatible',b'')
     check('RTL8197F-UART-exact-geometry',
@@ -180,7 +180,35 @@ def audit(image):
           uart.get('reg-shift')==struct.pack('>I',2) and
           uart.get('clock-frequency')==struct.pack('>I',100000000) and
           uart.get('status')==b'okay\0')
-    for path in ('/spi@18143000','/pcie-controller@18b00000','/pcie-controller@18b20000','/wmac@18640000','/ethernet@18010000'):check('disabled:'+path,tree.get(path,{}).get('status')==b'disabled\0')
+    spi=tree.get('/spi@18143000',{});nor=tree.get('/spi@18143000/m25p80@0',{})
+    check('SPI0-BH25Q64-readonly-probe-geometry',
+          spi.get('status')==b'okay\0' and
+          nor.get('compatible')==b'jedec,spi-nor\0' and
+          nor.get('reg')==struct.pack('>I',0) and
+          nor.get('spi-max-frequency')==struct.pack('>I',25000000))
+    gpio0=tree.get('/soc/gpio-controller@3500',{});gpio1=tree.get('/soc/gpio-controller@351C',{})
+    rstbtn=tree.get('/gpio-keys-polled/reset',{})
+    sw=tree.get('/rtl8367b',{});pclk=tree.get('/pcie_clk',{})
+    check('GPIO-and-verified-reset-button',
+          gpio0.get('status')==b'okay\0' and gpio1.get('status')==b'okay\0' and
+          rstbtn.get('label')==b'reset\0' and
+          rstbtn.get('linux,code')==struct.pack('>I',0x198) and
+          len(rstbtn.get('gpios',b''))==12 and struct.unpack('>II',rstbtn['gpios'][4:])==(4,1))
+    check('RTL8367S-switch-exact-SMI-and-cpu-port',
+          sw.get('compatible')==b'realtek,rtl8367b\0' and
+          sw.get('cpu_port')==struct.pack('>I',6) and
+          len(sw.get('gpio-sck',b''))==12 and struct.unpack('>II',sw['gpio-sck'][4:])==(24,0) and
+          len(sw.get('gpio-sda',b''))==12 and struct.unpack('>II',sw['gpio-sda'][4:])==(23,0))
+    check('enabled:/ethernet@18010000',tree.get('/ethernet@18010000',{}).get('status')==b'okay\0')
+    check('enabled:/pcie-controller@18b00000-40MHz',
+          tree.get('/pcie-controller@18b00000',{}).get('status')==b'okay\0' and
+          pclk.get('clock-frequency')==struct.pack('>I',40000000))
+    check('disabled:/pcie-controller@18b20000',tree.get('/pcie-controller@18b20000',{}).get('status')==b'disabled\0')
+    wmac=tree.get('/wmac@18640000',{})
+    check('enabled:/wmac@18640000-rtl8197g',
+          wmac.get('status')==b'okay\0' and
+          b'realtek,rtl8197g-wlan\0' in wmac.get('compatible',b'') and
+          wmac.get('reg')==struct.pack('>II',0x18640000,0x40000))
     parts={}
     for path,props in tree.items():
         if '/partition@' in path:
@@ -193,9 +221,88 @@ def audit(image):
     forbidden=[]
     for name in byname:
         low=name.lower()
-        if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtl8192cd')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.3.9-uart-soc-id-dispatch\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
-    network=byname.get('etc/config/network',{}).get('data',b'');check('loopback-only-defaults',b"'loopback'" in network and not re.search(rb'\b(?:eth\d|wlan\d|wan|lan)\b',network));check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
+        if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtw88','rtl8822be')):forbidden.append(name)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.7.0-m3-full-router-repeater-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net');rstbtn_sh=byname.get('etc/rc.button/reset')
+    check('rsd0614-wired-network-config',
+          b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
+          b'ucidef_add_switch "switch0" "4:wan" "0:lan" "1:lan" "2:lan" "3:lan" "6t@eth0"' in boardnet and
+          b'02:06:14:00:00:01' in boardnet and b'02:06:14:00:00:02' in boardnet and
+          b"ports='4 6t'" in ucinet and b"ports='0 1 2 3 6t'" in ucinet and b"ipaddr='192.168.1.1'" in ucinet and
+          b"multicast_to_unicast='0'" in ucinet and
+          b"flow_offloading='1'" in ucinet and b"flow_offloading_hw='0'" in ucinet and
+          'etc/config/network' not in byname and
+          netinit is not None and (netinit['mode']&0o777)==0o755 and
+          b'USE_PROCD' not in netinit['data'] and b'hwnat' in netinit['data'] and
+          b'fabric_gw_rearm' in netinit['data'] and b'rtl865x_gw' not in netinit['data'] and
+          b'swconfig dev switch0 set apply 1' in netinit['data'] and
+          rstbtn_sh is not None and stat.S_ISREG(rstbtn_sh['mode']) and (rstbtn_sh['mode']&0o777)==0o755 and
+          b'jffs2reset' not in rstbtn_sh['data'] and b'-ge 3' in rstbtn_sh['data'] and
+          b'maxLen088c=%04x' in payload)
+    wifimod=byname.get('lib/modules/4.14.187/rtl8192cd.ko');wifiauto=byname.get('etc/modules.d/60-rtl8192cd-rsd0614',{}).get('data',b'')
+    wifish=byname.get('lib/netifd/wireless/rtl8192cd.sh')
+    luci_wjs=byname.get('www/luci-static/resources/view/network/wireless.js',{}).get('data',b'')
+    luci_wjs_compact=re.sub(rb'\s+',b'',luci_wjs)
+    libiwinfo=byname.get('usr/lib/libiwinfo.so',{}).get('data',b'')
+    dropbear_init=byname.get('etc/init.d/dropbear',{}).get('data',b'')
+    has_iwpriv=('usr/sbin/iwpriv' in byname) or ('sbin/iwpriv' in byname)
+    check('rsd0614-m3-dualband-wifi-and-luci',
+          wifimod is not None and len(wifimod['data'])>65536 and
+          b'rtl8192cd' in wifiauto and
+          wifish is not None and stat.S_ISREG(wifish['mode']) and (wifish['mode']&0o777)==0o755 and
+          b'init_wireless_driver' in wifish['data'] and b'add_driver rtl8192cd' in wifish['data'] and
+          b'_wireless_set_brsnoop_isolation() { return 0; }' in wifish['data'] and
+          b'${phy_ifname}_ampdu=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI20M=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI40M=1' in wifish['data'] and
+          b'${phy_ifname}_shortGI80M=1' in wifish['data'] and
+          b'rtl_emit_country' in wifish['data'] and
+          b'${ifname}_opmode=8' in wifish['data'] and
+          b'${ifname}_bssid2join=' in wifish['data'] and
+          b'${ifname}_nat25_disable=' in wifish['data'] and
+          b'${phy_ifname}_vap_enable=' in wifish['data'] and
+          b'rtl_down_radio' in wifish['data'] and b'rtl_sta_needs_nat25' in wifish['data'] and
+          b'-vxd' in wifish['data'] and b'-va0' in wifish['data'] and
+          b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and
+          b'/sys/class/net/' in wifish['data'] and b'mib_all' not in wifish['data'] and
+          b'HT40+|VHT40+) echo 2' in wifish['data'] and
+          b'rtl_derive_band' in wifish['data'] and b'rtl_validate_psk' in wifish['data'] and
+          b'encmode=6' not in wifish['data'] and b'led_type' not in wifish['data'] and
+          b'rtl8192cd' in luci_wjs_compact and b'VHT80' in luci_wjs_compact and
+          b'nat25_disable' in luci_wjs_compact and
+          b"rtl_bssid.depends('mode','sta')" in luci_wjs_compact and
+          b"unshift('auto','auto',true)" in luci_wjs_compact and
+          b".filter(function(a){returna=='sae'}).length>0" in luci_wjs_compact and
+          b'/proc/%s/sta_info' in libiwinfo and b'/proc/%s/mib_auth' in libiwinfo and
+          'usr/sbin/relayd' in byname and 'usr/bin/iwinfo' in byname and
+          'www/luci-static/resources/protocol/relay.js' in byname and
+          b'RSD0614-OpenWrt-5G' in ucinet and b'RSD0614-OpenWrt-2G' in ucinet and
+          b"country='US'" in ucinet and
+          (not dropbear_init or b'START=98' in dropbear_init) and
+          'usr/sbin/uhttpd' in byname and 'usr/lib/uhttpd_lua.so' in byname and 'www/cgi-bin/luci' in byname and has_iwpriv)
+    ko_ok=False;ko_detail='missing rtl8192cd.ko'
+    if wifimod is not None:
+        try:
+            from export_build_evidence import parse_elf32_le_kmod_info
+            ko_info=parse_elf32_le_kmod_info(wifimod['data'])
+            kblob=payload[:cpiooff]
+            missing_kstr=[s for s in ko_info['undef_symbols'] if (b'\x00'+s.encode('ascii')+b'\x00') not in kblob]
+            has_proc=('rtl8192cd_proc_init' in ko_info['defined_symbols']) or ('proc_create_data' in ko_info['undef_symbols'] and b'\x00mib_all\x00' in wifimod['data'])
+            has_giwname=('rtl_giwname' in ko_info['defined_symbols']) or (b'\x00IEEE 802.11\x00' in wifimod['data'])
+            has_giwtxpow=('rtl_giwtxpow' in ko_info['defined_symbols']) or (b'\x00rtl_giwtxpow\x00' in wifimod['data'])
+            has_wstats=('rtl8192cd_get_wireless_stats' in ko_info['defined_symbols']) or (b'\x00rtl8192cd_get_wireless_stats\x00' in wifimod['data'])
+            has_nat25=('nat25_handle_frame' in ko_info['defined_symbols']) or (b'\x00nat25_handle_frame\x00' in wifimod['data'])
+            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and has_proc and has_giwname and has_giwtxpow and has_wstats and has_nat25 and ko_info['bss_bytes']<=1536*1024)
+            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} proc_init={int(has_proc)} giwname={int(has_giwname)} giwtxpow={int(has_giwtxpow)} wstats={int(has_wstats)} nat25={int(has_nat25)} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
+        except (OSError,ValueError,struct.error) as e:
+            ko_ok=False;ko_detail=str(e)
+    check('rtl8192cd-elf-ksymtab-and-bss-guard',ko_ok,ko_detail)
+    check('cpio-duplicate-paths-consistent',True,', '.join(duplicate_paths) if duplicate_paths else 'none')
+    survey=byname.get('usr/sbin/rsd0614-survey')
+    check('omnibus-survey-tool-executable',survey is not None and stat.S_ISREG(survey['mode']) and (survey['mode']&0o777)==0o755 and survey['data'].startswith(b'#!/bin/sh\n') and b'/proc/rsd0614_hw_survey' in survey['data'] and b'print_net' in survey['data'] and b'print_flash_layout' in survey['data'] and b'[:print:]' not in survey['data'] and b'mtd2ro_cr6c_end=' in survey['data'] and b'BUTTON_HOTPLUG_AND_GPIO' in survey['data'] and b'/dev/mtdblock' not in survey['data'])
+    auto_survey=[n for n in byname if (n.startswith(('etc/rc.d/','etc/init.d/')) and 'survey' in n.lower()) or (n.startswith(('lib/preinit/','etc/init.d/')) and b'rsd0614-survey' in byname[n].get('data',b'')) or (n=='etc/rc.local' and b'rsd0614-survey' in byname[n].get('data',b''))]
+    check('omnibus-survey-no-auto-exec',not auto_survey,', '.join(auto_survey))
+    check('kernel-omnibus-survey-proc-nodes',b'rsd0614_hw_survey\0' in payload and b'rsd0614_probe\0' in payload)
     matches=[row for row in table if row['id']=='684017' and row['id_len']==3];check('BH25Q64-exact-id-and-geometry',len(matches)==1 and matches[0]['sector_size']==65536 and matches[0]['n_sectors']==128)
     if matches:check('BH25Q64-conservative-flags',matches[0]['flags']==0x2008)
     banner=re.search(rb'Linux version [^\x00\n]+',payload)

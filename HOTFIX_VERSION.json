@@ -1,9 +1,9 @@
 {
-  "version": "5.3.9-uart-soc-id-dispatch",
-  "base": "5.3.8-uart-register-semantics",
-  "change": "dispatch RTL8197F DW8250 register layout and LCR/divisor quirks at runtime by SoC ID (RTL8197FH-VG 0x81970000 standard 16550/DW-APB vs non-VG 0x8197F000 index-9/adjlcr), translate LCR before serial_out MMIO writes, preserve UPF_SHARE_IRQ|UPF_FIXED_PORT, and capture $ImageId cleanly in Build-RSD0614.ps1",
-  "volume": "rsd0614-openwrt-v539-work",
-  "volume_label": "rsd0614.work=v5.3.9",
+  "version": "5.7.0-m3-full-router-repeater-ramboot",
+  "base": "5.6.5-m3-final-ramboot",
+  "change": "Full router + Wi-Fi Repeater + Multi-SSID RAM-boot release consolidating all 4-agent audit findings into one build: (1) rtl8192cd driver: enable CLIENT_MODE + UNIVERSAL_REPEATER (wlanX-vxd) + VXD_DIFF_MAC + MBSSID (wlanX-va0) with distinct MACs and skip site_survey on AP VAPs, fix 8814B/8197G ADDRCAM/StopMBSSID88XX_V2/StopHW88XX/STA BCNQ/NAPI-close races, harden RTK_BR_EXT NAT2.5 (br_port_exists, dynamic br_mac, skb_cloned expand, tailroom guard), and fix WEXT scan/stats/security IE/bounds (async rtl_siwscan, -EAGAIN + bss_backup + dBm + SIOCGIWENCODE in rtl_giwscan, WLAN_HDR_A3_LEN in rtw_get_sec_ie, WholeFrame clamp, rtl8192cd_get_wireless_stats, STA rtl_giwap/rtl_giwrate, rewrite_line clamp); (2) libiwinfo WEXT compat patch (patches/iwinfo-wext-rsd0614.patch): resolve radioN->wlanN, add .htmode/.survey/.lookup_phy stubs preventing rpcd SIGSEGV, parse /proc/<ifname>/sta_info for LuCI Associated Stations & /proc/<ifname>/mib_auth for Encryption, parse SIOCGIWNAME for hwmodelist/htmodelist, respect IW_QUAL_*_INVALID, and defer country to UCI; (3) netifd rtl8192cd.sh: full AP, STA (routed WISP / relayd / auto-NAT2.5 bridged), Same-Band Universal Repeater (wlanX + wlanX-vxd), and Multi-SSID Guest Wi-Fi (wlanX-va0) with bssid2join, per-VIF macaddr, control-char guard, and ordered down/up rollback; (4) LuCI wireless.js: fix upstream 19.07 Join Network .filter() truthy-array bug forcing encryption=sae on WPA2, re-enable Client mode, bind bssid/maxassoc/nat25_disable, and keep auto channel; (5) add relayd + luci-proto-relay + iwinfo CLI + zero-risk kernel diet (~260-350 KiB reclaimed) + rtl819x-eth.c eth_skb_pad() runt TX OOB DMA fix; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v570-work",
+  "volume_label": "rsd0614.work=v5.7.0",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -13,7 +13,19 @@
     "rsd0614-openwrt-v535-work",
     "rsd0614-openwrt-v536-work",
     "rsd0614-openwrt-v537-work",
-    "rsd0614-openwrt-v538-work"
+    "rsd0614-openwrt-v538-work",
+    "rsd0614-openwrt-v539-work",
+    "rsd0614-openwrt-v540-work",
+    "rsd0614-openwrt-v541-work",
+    "rsd0614-openwrt-v542-work",
+    "rsd0614-openwrt-v550-work",
+    "rsd0614-openwrt-v551-work",
+    "rsd0614-openwrt-v560-work",
+    "rsd0614-openwrt-v561-work",
+    "rsd0614-openwrt-v562-work",
+    "rsd0614-openwrt-v563-work",
+    "rsd0614-openwrt-v564-work",
+    "rsd0614-openwrt-v565-work"
   ],
   "persistent_flash": "NO-GO"
 }

@@ -31,7 +31,7 @@ WIFI_DRIVER_COMMIT=1529557b0936019462c4b24f98bc8436d359bd3a
 LUCI_COMMIT=f25285a6c26e8776f153994704710cb8e51fad91
 PACKAGES_COMMIT=6df6880800397ab3821572c6c5ad18e300374d9e
 DONOR_DIR="$WORK_DIR/donor"; OPENWRT_DIR="$WORK_DIR/openwrt"; WIFI_DIR="$WORK_DIR/wifi-driver"; LUCI_DIR="$WORK_DIR/feed-luci"; PACKAGES_DIR="$WORK_DIR/feed-packages"
-fingerprint="$(cd "$PORT_DIR"; sha256sum RSD0614.dts seed-rsd0614-initramfs.config apply_rsd0614_profile.py harden_source.py packages/rtl8192cd-rsd0614/Makefile patches/*.patch SOURCE_LOCK.json | sha256sum | cut -d' ' -f1)"
+fingerprint="$(cd "$PORT_DIR"; sha256sum RSD0614.dts seed-rsd0614-initramfs.config apply_rsd0614_profile.py harden_source.py build-rsd0614-initramfs.sh packages/rtl8192cd-rsd0614/Makefile patches/*.patch SOURCE_LOCK.json | sha256sum | cut -d' ' -f1)"
 project_commit="${PROJECT_COMMIT:-}"
 if [[ -z "$project_commit" ]]; then project_commit="$(git -C "$PORT_DIR" rev-parse HEAD 2>/dev/null || true)"; fi
 [[ -n "$project_commit" ]] || project_commit=NOT_AVAILABLE
@@ -62,6 +62,8 @@ mkdir -p "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src"
 cp "$PORT_DIR/packages/rtl8192cd-rsd0614/Makefile" "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/Makefile"
 cp -a "$WIFI_DIR/package/kernel/rtl8192cd-rtl8197f/src/." "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src/"
 patch -d "$OPENWRT_DIR/package/kernel/rtl8192cd-rsd0614/src" -p1 -F0 -i "$PORT_DIR/patches/rtl8192cd-4.14-rsd0614.patch"
+mkdir -p "$OPENWRT_DIR/package/network/utils/iwinfo/patches"
+cp "$PORT_DIR/patches/iwinfo-wext-rsd0614.patch" "$OPENWRT_DIR/package/network/utils/iwinfo/patches/999-rsd0614-wext-rtl8192cd-compat.patch"
 STAGE=feeds_stage
 checkout_exact "$LUCI_DIR" https://github.com/openwrt/luci.git "$LUCI_COMMIT"
 checkout_exact "$PACKAGES_DIR" https://github.com/openwrt/packages.git "$PACKAGES_COMMIT"
@@ -69,7 +71,7 @@ printf 'src-link luci %s\nsrc-link packages %s\n' "$LUCI_DIR" "$PACKAGES_DIR" > 
 (
     cd "$OPENWRT_DIR"
     ./scripts/feeds update luci packages
-    ./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap luci-app-firewall luci-proto-ppp cgi-io
+    ./scripts/feeds install luci luci-base luci-mod-admin-full luci-theme-bootstrap luci-app-firewall luci-proto-ppp luci-proto-relay cgi-io
 )
 python3 - "$OPENWRT_DIR/feeds/luci/modules/luci-mod-network/htdocs/luci-static/resources/view/network/wireless.js" <<'PY'
 import pathlib, sys
@@ -88,15 +90,19 @@ freq_snippet = """
 \t\t\t\t\thtmodelist.VHT40 = true;
 \t\t\t\t\thtmodelist.VHT80 = true;
 \t\t\t\t\tif (this.channels['11a'].length == 0) {
-\t\t\t\t\t\tthis.channels['11a'].push('auto', 'auto', true);
 \t\t\t\t\t\t[ 36, 40, 44, 48, 149, 153, 157, 161, 165 ].forEach(L.bind(function(ch) {
 \t\t\t\t\t\t\tthis.channels['11a'].push(ch, '%d (%d Mhz)'.format(ch, 5000 + ch * 5), true);
 \t\t\t\t\t\t}, this));
 \t\t\t\t\t}
-\t\t\t\t} else if (this.channels['11g'].length == 0) {
-\t\t\t\t\tthis.channels['11g'].push('auto', 'auto', true);
-\t\t\t\t\tfor (var ch = 1; ch <= 11; ch++)
-\t\t\t\t\t\tthis.channels['11g'].push(ch, '%d (%d Mhz)'.format(ch, 2407 + ch * 5), true);
+\t\t\t\t\tif (this.channels['11a'][0] !== 'auto')
+\t\t\t\t\t\tthis.channels['11a'].unshift('auto', 'auto', true);
+\t\t\t\t} else {
+\t\t\t\t\tif (this.channels['11g'].length == 0) {
+\t\t\t\t\t\tfor (var ch = 1; ch <= 11; ch++)
+\t\t\t\t\t\t\tthis.channels['11g'].push(ch, '%d (%d Mhz)'.format(ch, 2407 + ch * 5), true);
+\t\t\t\t\t}
+\t\t\t\t\tif (this.channels['11g'][0] !== 'auto')
+\t\t\t\t\t\tthis.channels['11g'].unshift('auto', 'auto', true);
 \t\t\t\t}
 \t\t\t}
 """
@@ -213,8 +219,8 @@ mode_old = """\t\t\t\to = ss.taboption('general', form.ListValue, 'mode', _('Mod
 """
 mode_new = """\t\t\t\to = ss.taboption('general', form.ListValue, 'mode', _('Mode'));
 \t\t\t\to.value('ap', _('Access Point'));
+\t\t\t\to.value('sta', _('Client'));
 \t\t\t\tif (hwtype != 'rtl8192cd') {
-\t\t\t\t\to.value('sta', _('Client'));
 \t\t\t\t\to.value('adhoc', _('Ad-Hoc'));
 \t\t\t\t}
 """
@@ -224,6 +230,10 @@ if mode_new not in text:
     text = text.replace(mode_old, mode_new, 1)
 
 iface_snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
+\t\t\t\t\tvar rtl_bssid = ss.children.filter(function(c) { return c.option == 'bssid' })[0];
+\t\t\t\t\tif (rtl_bssid)
+\t\t\t\t\t\trtl_bssid.depends('mode', 'sta');
+
 \t\t\t\t\to = ss.taboption('general', form.Flag, 'hidden', _('Hide <abbr title="Extended Service Set Identifier">ESSID</abbr>'));
 \t\t\t\t\to.depends('mode', 'ap');
 
@@ -231,12 +241,17 @@ iface_snippet = """\t\t\t\telse if (hwtype == 'rtl8192cd') {
 \t\t\t\t\to.depends('mode', 'ap');
 
 \t\t\t\t\to = ss.taboption('advanced', form.Value, 'maxassoc', _('Max Clients'), _('Maximum number of associated clients (0 = unlimited)'));
+\t\t\t\t\to.depends('mode', 'ap');
 \t\t\t\t\to.optional = true;
 \t\t\t\t\to.placeholder = 0;
 \t\t\t\t\to.datatype = 'uinteger';
+
+\t\t\t\t\to = ss.taboption('advanced', form.Flag, 'nat25_disable', _('Disable NAT2.5 L2 Bridge'), _('Disable driver L2 address translation on bridged client links (leave unchecked for automatic mode).'));
+\t\t\t\t\to.depends('mode', 'sta');
+\t\t\t\t\to.rmempty = true;
 \t\t\t\t}
 """
-if "\t\t\t\telse if (hwtype == 'rtl8192cd') {\n\t\t\t\t\to = ss.taboption('general', form.Flag, 'hidden'" not in text:
+if "\t\t\t\telse if (hwtype == 'rtl8192cd') {\n\t\t\t\t\tvar rtl_bssid =" not in text:
     iface_anchor = """\t\t\t\t\to = ss.taboption('advanced', form.Flag, 'disassoc_low_ack', _('Disassociate On Low Acknowledgement'), _('Allow AP mode to disconnect STAs based on low ACK condition'));
 \t\t\t\t\to.default = o.enabled;
 \t\t\t\t}
@@ -260,6 +275,28 @@ if wep_new not in text:
         raise SystemExit(f"Expected single wep crypto_modes anchor in {p}, found {text.count(wep_old)}")
     text = text.replace(wep_old, wep_new, 1)
 
+# Fix upstream LuCI 19.07 Join Network bug: Array.filter() returns truthy [] so
+# is_sae was always true on WPA2-PSK networks, forcing encryption='sae'.
+join_fixes = [
+    (
+        "is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' })),",
+        "is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' }).length > 0),",
+    ),
+    (
+        "is_sae = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'sae' }));",
+        "is_sae = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'sae' }).length > 0);",
+    ),
+    (
+        "is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' || a == 'sae' })),",
+        "is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' || a == 'sae' }).length > 0),",
+    ),
+]
+for old_j, new_j in join_fixes:
+    if new_j not in text:
+        if text.count(old_j) != 1:
+            raise SystemExit(f"Expected single Join filter anchor in {p}, found {text.count(old_j)}: {old_j}")
+        text = text.replace(old_j, new_j, 1)
+
 p.write_text(text)
 updated = p.read_text()
 assert "hwtype == 'rtl8192cd'" in updated
@@ -267,6 +304,9 @@ assert "hwtype != 'rtl8192cd'" in updated
 assert "htmodelist.VHT80 = true;" in updated
 assert "uci.get('wireless', section_id, 'type') == 'rtl8192cd'" in updated
 assert "'maxassoc'" in updated
+assert "rtl_bssid.depends('mode', 'sta');" in updated
+assert "unshift('auto', 'auto', true);" in updated
+assert ".filter(function(a) { return a == 'sae' }).length > 0" in updated
 print("LUCI_WIRELESS_JS_RTL8192CD: PASS")
 PY
 python3 - "$OPENWRT_DIR/package/network/services/dropbear/files/dropbear.init" <<'PY'

@@ -27,17 +27,18 @@ The project has already verified on a physical RSD0614 unit:
 - **v5.6.4 (`v5.6.4-m3-router-hardened-ramboot`, CI run `#45723595834`) verified on physical RSD0614 V1.0**:
   - Zero panic, zero UART `n=512` RX byte-stealing, zero `swnic`/`8367S` boot spam, `27.4 MiB` free RAM;
   - Stale `switch0` `VLAN 3..8` / `VLAN 7` WAN->LAN L2 bypass 100% closed (only `VLAN 1 [4 6t]` & `VLAN 2 [0 1 2 3 6t]`), `FLOWOFFLOAD` active in `iptables FORWARD`, `block_relay=0` on both radios with PC LAN -> 5 GHz phone `ping 192.168.1.179` (`4/4`, `0%` loss, avg `7 ms`), WEXT freq/rate/txpow/operstate UP (`5.18 GHz` `1.56 Gb/s` `17 dBm` & `2.437 GHz` `130 Mb/s` `19 dBm`), and LuCI login via `uhttpd-mod-lua`;
-- **v5.6.5 (`v5.6.5-m3-final-ramboot`, current candidate, `NOT YET VERIFIED` on hardware)** fixes the remaining audited Wi-Fi throughput, regulatory, WEXT, and survey bugs in one final M3 RAM-boot build:
-  - **TX A-MPDU & Short GI**: emits `ampdu=1`, `shortGI20M=1`, `shortGI40M=1`, and `shortGI80M=1` (5 GHz) in `rtl8192cd.sh` (unlocking 802.11ac/n Block-Ack aggregation & Short GI on both `wlan0` and `wlan1`);
-  - **Regulatory country & WEXT WPA2**: aligns `rtl_country_to_regdomain` to `8192cd_11h.c` `countryIEArray` + emits `countrystr`/`country2reg` so non-US countries (`VN`, `EU`, `JP`, `CN`, `TW`, `00`) are never overwritten back to `US`, and fixes `rtl_giwencode()` (`erq->length = 16` + zeroed buffer) so `iwconfig` displays masked WPA2 encryption instead of `off`;
-  - **Survey & M4 read-only flash-layout**: fixes BusyBox `tr -cd '\040-\176\n'`, adds non-64K `cr6c_end` + `4 KiB` read-only `mtd2ro` rootfs discovery, `uhttpd` `ps w`, `radio=0` factory RF dmesg, `br-lan` `multicast_to_unicast`, and `gpio-button-hotplug` status;
+- **v5.6.5 (`v5.6.5-m3-final-ramboot`, CI run `#45827182660`)**: compiled & offline-audited (`32/32` PASS, `4,221,200` bytes / `0x00406910`, `decoded_size=14,633,113` B / `13.955 MiB`, SHA-256 `d1a22aac2d25851aa84d6227aa7f4080cd57f4d27c5eca78f9a00251267216a2`) adding TX A-MPDU, Short GI, real regulatory country codes, masked WEXT WPA2, and read-only `mtd2ro` non-64K survey;
+- **v5.7.0 (`v5.7.0-m3-full-router-repeater-ramboot`, current candidate, `NOT YET VERIFIED` on hardware)** consolidates a full 4-agent system audit into one complete router + Wi-Fi Repeater + Multi-SSID RAM-boot build:
+  - **Full Wi-Fi Repeater & Multi-SSID (`patches/rtl8192cd-4.14-rsd0614.patch`, `packages/rtl8192cd-rsd0614/Makefile`, `harden_source.py`)**: enables `CLIENT_MODE`, `UNIVERSAL_REPEATER` (`wlanX-vxd`), `VXD_DIFF_MAC`, and `MBSSID` (`wlanX-va0`) with distinct per-VIF MACs; supports AP, routed WISP STA, `relayd` L2 pseudo-bridge (`relayd` + `luci-proto-relay`), automatic `RTK_BR_EXT` NAT2.5 bridged STA (`nat25_disable=0` when bridged, `1` when routed), Cross-Band Repeater, Same-Band Universal Repeater (`wlanX` AP + `wlanX-vxd` STA), and Guest Multi-SSID (`wlanX-va0`), plus 8814B/8197G ADDRCAM/StopMBSSID88XX_V2/StopHW88XX/NAPI-close/WEXT scan & stats fixes;
+  - **LuCI Wireless Scan, Join & Live Telemetry (`patches/iwinfo-wext-rsd0614.patch`, `build-rsd0614-initramfs.sh`)**: adds `libiwinfo` WEXT compatibility (`radioN -> wlanN` resolution, `rpcd`-safe `.htmode`/`.survey`/`.lookup_phy`, `/proc/<ifname>/sta_info` Associated Stations & `/proc/<ifname>/mib_auth` Encryption parsing, `SIOCGIWNAME` `hwmodelist`/`htmodelist`, `iwinfo` CLI) and fixes upstream LuCI 19.07's `Join Network` `.filter()` truthy-array bug that forced `encryption='sae'` on WPA2 networks while enabling Client mode, BSSID lock, `nat25_disable`, and `auto` channel;
+  - **Wired & Memory Hardening**: adds `eth_skb_pad(skb)` in `rtl819x-eth.c` to prevent runt TX OOB DMA on short ARP/TCP ACK frames and trims unused container/core-dump kernel options (`CGROUPS`, `NAMESPACES`, `SWAP`, `AIO`, `COREDUMP`, `FANOTIFY`, `FHANDLE`, `POSIX_MQUEUE`, `SECCOMP`) to reclaim `~260–350 KiB` of RAM and initramfs headroom;
   - **Unchanged safety boundary**: all 6 MTD partitions stay `read-only`, `pcie1` remains disabled, unverified LED GPIOs remain unclaimed, and persistent flash remains **NO-GO**.
 
 ## Consolidated bring-up roadmap
 
 1. **M1 (`v5.3.9` -> `v5.4.2` — VERIFIED on physical RSD0614 V1.0)**: Clean `ttyS0` console, read-only `BH25Q64` MTDs, Reset button (`gpio1 4`), `RTL8367S` (`smi_pefgh_24_23`), `RTL8197G` WMAC (`HAL 0x15`), and `PCIe0` `10ec:b814` Link UP.
 2. **M2 (`v5.5.1-vg-newdesc-ramboot` — VERIFIED on physical RSD0614 V1.0)**: Full Gigabit wired RAM-boot router (`RTL8367S` `switch0` + `RTL8197FH-VG` 6-dword NIC + LAN `192.168.1.1` ping/SSH + `PCIe0` `10ec:b814` + Reset button).
-3. **M3 (`v5.6.4` hardened RAM-boot VERIFIED -> `v5.6.5-m3-final-ramboot` current candidate, `NOT YET VERIFIED` on hardware)**: Full-MTU Gigabit wired + dual-band Wi-Fi AP (`RSD0614-OpenWrt-5G` + `RSD0614-OpenWrt-2G`, TX A-MPDU + Short GI + real country codes) + LuCI 19.07 (`uhttpd-mod-lua`) + clean L2 switch isolation (`VLAN 1/2` only) + `block_relay=0` + software flow offloading + read-only `flash-layout` / SSH streaming backup guide in RAM. Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
+3. **M3 (`v5.6.4` hardened RAM-boot VERIFIED -> `v5.7.0-m3-full-router-repeater-ramboot` current candidate, `NOT YET VERIFIED` on hardware)**: Complete RAM-boot router with full-MTU Gigabit wired + PPPoE + IPv6 + NAT/`FLOWOFFLOAD` + dual-band Wi-Fi AP (TX A-MPDU + Short GI + real country codes) + full Wi-Fi Repeater (WISP routed STA, `relayd`/`luci-proto-relay` L2 bridge, `RTK_BR_EXT` NAT2.5 bridged STA, Cross-Band & Same-Band Universal Repeater `wlanX-vxd`) + Multi-SSID Guest Wi-Fi (`wlanX-va0`) + LuCI 19.07 Scan/Join/Associated Stations (`libiwinfo` WEXT compat + `iwinfo` CLI). Persistent flash remains **NO-GO** unless an explicit later milestone changes `AGENTS.md`.
 
 ## Safety contract
 
@@ -84,14 +85,14 @@ This repository is currently public. GitHub explicitly recommends against attach
 ## Repository layout
 
 - `RSD0614.dts` — M3 RAM-boot DTS (verified wired Gigabit + Reset button + 40 MHz PCIe0 + `RTL8197G` WMAC + 6 read-only MTDs; `pcie1` disabled).
-- `seed-rsd0614-initramfs.config` — initramfs configuration (`kmod-rtl8192cd-rsd0614`, LuCI 19.07 + `uhttpd`, `wireless-tools`, `ethtool`, `iperf3`; `# CONFIG_GDB is not set`).
-- `packages/rtl8192cd-rsd0614/Makefile` — out-of-tree pinned Realtek SDK v3.6.0 dual-band Wi-Fi kernel package.
+- `seed-rsd0614-initramfs.config` — initramfs configuration (`kmod-rtl8192cd-rsd0614`, LuCI 19.07 + `uhttpd`, `relayd` + `luci-proto-relay`, `iwinfo`, `wireless-tools`, `ethtool`, `iperf3`, zero-risk kernel diet; `# CONFIG_GDB is not set`).
+- `packages/rtl8192cd-rsd0614/Makefile` — out-of-tree pinned Realtek SDK v3.6.0 dual-band Wi-Fi kernel package (AP + STA + Universal Repeater + MBSSID).
 - `build-rsd0614-initramfs.sh` — pinned build orchestration inside Linux/Docker with opt-in `CACHE_DIR` toolchain/dl seed support.
 - `build-local-linux.sh` — local Linux / Cloud VM cached Docker build wrapper.
 - `harden_source.py` — donor-tree isolation, target hardening, M3 wired + dual-band wireless `netifd`/UCI config, and `usr/sbin/rsd0614-survey` staging.
 - `deep_audit.py` — binary/DTB/CPIO/SPI-NOR/network/Wi-Fi/LuCI/survey offline audit.
 - `test_*.py` — regression suite.
-- `patches/` — target-specific kernel and driver patches (`9996` VG RGMII/PCIe0, `9997` omnibus survey/probe, `9998*` UART, `9999` `BH25Q64`, `rtl8192cd-4.14-rsd0614.patch`).
+- `patches/` — target-specific kernel, driver, and `libiwinfo` patches (`9996` VG RGMII/PCIe0, `9997` omnibus survey/probe, `9998*` UART, `9999` `BH25Q64`, `rtl8192cd-4.14-rsd0614.patch`, `iwinfo-wext-rsd0614.patch`).
 - `docs/` — current audit/build notes.
 
 ## License

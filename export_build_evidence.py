@@ -91,6 +91,7 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         'if (hang_cnt >= 25)',
         'bool pressure = runout || used > 400;',
         'if (skb_is_nonlinear(skb) && skb_linearize(skb))',
+        'if (eth_skb_pad(skb))',
         'if (of_machine_is_compatible("rockspace,rsd0614"))',
         'fabric_gw_rearm = 0;',
         'static int dp_heartbeat;',
@@ -280,17 +281,18 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     ko_info=parse_elf32_le_kmod_info(wifiko.read_bytes())
     missing_syms=sorted(set(ko_info['undef_symbols'])-ksymtab)
     if missing_syms:raise ValueError('Unresolved rtl8192cd.ko symbols missing from vmlinux __ksymtab: '+', '.join(missing_syms))
-    for req_def in ('rtl8192cd_proc_init','rtl_giwname','rtl_giwtxpow'):
+    for req_def in ('rtl8192cd_proc_init','rtl_giwname','rtl_giwtxpow','rtl8192cd_get_wireless_stats','nat25_handle_frame'):
         if req_def not in ko_info['defined_symbols']:
-            raise ValueError('Required v5.6.4 global symbol missing from compiled rtl8192cd.ko: '+req_def)
+            raise ValueError('Required v5.7.0 global symbol missing from compiled rtl8192cd.ko: '+req_def)
     if ko_info['bss_bytes']>1536*1024:raise ValueError(f'rtl8192cd.ko .bss too large for 64 MiB RAM: {ko_info["bss_bytes"]} bytes')
     boardsrc=wifidir/'linux6/rtl8192cd_board.c';socsrc=wifidir/'linux6/rtl8197f_soc.c';compatsrc=wifidir/'rtl8197f_linux_compat.h'
+    coresrc=wifidir/'linux6/rtl8192cd_core.c';corehsrc=wifidir/'core/core.h';brextsrc=wifidir/'8192cd_br_ext.c';smesrc=wifidir/'8192cd_sme.c'
     coretxsrc=wifidir/'core/8192cd_core_tx.c';cfghsrc=wifidir/'8192cd_cfg.h';osdepsrc=wifidir/'8192cd_osdep.c'
     comapisrc=wifidir/'8192cd_comapi.c';ioctlsrc=wifidir/'8192cd_ioctl.c'
     txdescsrc=wifidir/'WlanHAL/RTL88XX/Hal88XXTxDesc.c';halgensrc=wifidir/'WlanHAL/RTL88XX/Hal88XXGen.c'
     h8814bcfg=wifidir/'WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h';h8197ggen=wifidir/'WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c'
     halfwsrc=wifidir/'WlanHAL/RTL88XX/Hal88XXFirmware.c'
-    for p in (boardsrc,socsrc,compatsrc,coretxsrc,cfghsrc,osdepsrc,comapisrc,ioctlsrc,txdescsrc,halgensrc,h8814bcfg,h8197ggen,halfwsrc):
+    for p in (boardsrc,socsrc,compatsrc,coresrc,corehsrc,brextsrc,smesrc,coretxsrc,cfghsrc,osdepsrc,comapisrc,ioctlsrc,txdescsrc,halgensrc,h8814bcfg,h8197ggen,halfwsrc):
         if not p.is_file():raise ValueError('Missing compiled M3 Wi-Fi source evidence: '+str(p))
     boardtext=boardsrc.read_text()
     for token in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614','mac_pton(ascii_mac, addr)','keeping fallback'):
@@ -301,33 +303,49 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
     for token in ('BIT(29)','0xB8003000','0xB8003004','& ~BIT(29)'):
         if token not in soctext:raise ValueError('M3 WMAC GIMR BIT(29) probe-mask guard missing from compiled rtl8197f_soc.c: '+token)
     if '| BIT(29)' in soctext:raise ValueError('rtl8197f_soc.c must not unmask GIMR BIT(29) before request_irq()')
+    coretext=coresrc.read_text(errors='replace')
+    for token in ('rtl8192cd_init_one(NULL, NULL, wdev, -1)','rtl8192cd_init_one(NULL, NULL, wdev, vidx)'):
+        if token not in coretext:raise ValueError('v5.7.0 VXD/VAP registration missing from compiled rtl8192cd_core.c: '+token)
+    if 'br_port_exists(netdev)' not in corehsrc.read_text(errors='replace'):
+        raise ValueError('v5.7.0 GET_BR_PORT br_port_exists guard missing from compiled core/core.h')
+    brexttext=brextsrc.read_text(errors='replace')
+    for token in ('br_port->br->dev->dev_addr','skb_tailroom(skb) < 6'):
+        if token not in brexttext:raise ValueError('v5.7.0 NAT2.5 br_mac/tailroom fix missing from compiled 8192cd_br_ext.c: '+token)
+    if 'PROBE_FRAME_SIZE' not in smesrc.read_text(errors='replace'):
+        raise ValueError('v5.7.0 WholeFrame PROBE_FRAME_SIZE clamp missing from compiled 8192cd_sme.c')
     coretxtext=coretxsrc.read_text(errors='replace')
-    if 'LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)' not in coretxtext:raise ValueError('sk_pacing_shift_update 4.14 guard missing from compiled 8192cd_core_tx.c')
+    for token in ('LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)','skb_cloned(skb) && pskb_expand_head(skb, 0, 0, GFP_ATOMIC)'):
+        if token not in coretxtext:raise ValueError('v5.7.0 sk_pacing / cloned-skb guard missing from compiled 8192cd_core_tx.c: '+token)
     cfgtext=cfghsrc.read_text(errors='replace')
     for token in ('CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600','(!defined(CONFIG_RTL8192CD_LINUX6_BUS) || (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)))'):
         if token not in cfgtext:raise ValueError('64 MiB memory shrink / _INCLUDE_PROC_FS_ override missing from compiled 8192cd_cfg.h: '+token)
     osdeptext=osdepsrc.read_text(errors='replace')
-    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;','netif_carrier_on(dev);','netif_carrier_off(dev);'):
-        if token not in osdeptext:raise ValueError('v5.6.4 RTL8814B/WMAC/SET_NETDEV_DEV/HIQ_En/carrier hardening missing from compiled 8192cd_osdep.c: '+token)
+    for token in ('GET_CHIP_VER(priv) == VERSION_8814B','!defined(CONFIG_RTL8192CD_LINUX6_BUS)','__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)','(void)REG32(0xB8000064);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;','netif_carrier_on(dev);','netif_carrier_off(dev);','use_vxd_diff_mac = 1;','skb_queue_purge(&priv->pshare->linux6_rx_delivery);'):
+        if token not in osdeptext:raise ValueError('v5.7.0 RTL8814B/WMAC/VXD/VAP/NAPI-close hardening missing from compiled 8192cd_osdep.c: '+token)
     comapitext=comapisrc.read_text(errors='replace')
-    for token in ('int rtl_giwname(','int rtl_giwtxpow(','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY','erq->length = 16;','memset(key, 0, 16);'):
-        if token not in comapitext:raise ValueError('v5.6.5 WEXT handler fix missing from compiled 8192cd_comapi.c: '+token)
+    for token in ('int rtl_giwname(','int rtl_giwtxpow(','struct iw_statistics *rtl8192cd_get_wireless_stats(','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY','erq->length = 16;','memset(key, 0, 16);','WLAN_HDR_A3_LEN + _TIMESTAMP_','bss_backup','IW_QUAL_DBM'):
+        if token not in comapitext:raise ValueError('v5.7.0 WEXT handler/scan/stats fix missing from compiled 8192cd_comapi.c: '+token)
     ioctltext=ioctlsrc.read_text(errors='replace')
-    for token in ('(iw_handler) rtl_giwname,','(iw_handler) rtl_giwtxpow,'):
-        if token not in ioctltext:raise ValueError('v5.6.4 WEXT ioctl wiring missing from compiled 8192cd_ioctl.c: '+token)
+    for token in ('(iw_handler) rtl_giwname,','(iw_handler) rtl_giwtxpow,','.get_wireless_stats = rtl8192cd_get_wireless_stats,'):
+        if token not in ioctltext:raise ValueError('v5.7.0 WEXT ioctl/stats wiring missing from compiled 8192cd_ioctl.c: '+token)
     if '#define TX_HIQ_NUM_8814B                20' not in h8814bcfg.read_text(errors='replace'):
         raise ValueError('RTL8814B 20-HIQ alignment missing from compiled Hal8814BCfg.h')
     txdesctext=txdescsrc.read_text(errors='replace')
     for token in ('coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2','REG_HI16Q_TXBD_DESA_L','rsd0614_amsdu_txbd_dma','IE0_SET_TX_DESC_DATARATE(IE0_head, 4)','alloc_desc_bcn_addr'):
         if token not in txdesctext:raise ValueError('v5.6.4 RTL8814B/8197G TXBD/AMSDU/BCN fix missing from compiled Hal88XXTxDesc.c: '+token)
     halgentext=halgensrc.read_text(errors='replace')
-    for token in ('Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];','REG_P0HI16Q_HI17Q_TXBD_NUM','HCI_TX_DMA_QUEUE_CMD_V2','tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;'):
-        if token not in halgentext:raise ValueError('v5.6.4 Hal88XXGen TXBD/LLT/IMR fix missing from compiled Hal88XXGen.c: '+token)
+    for token in ('Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];','REG_P0HI16Q_HI17Q_TXBD_NUM','HCI_TX_DMA_QUEUE_CMD_V2','tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;','is_MAC_v4','BIT__ADDRCAM_ADDR((camIdx*8)+i)'):
+        if token not in halgentext:raise ValueError('v5.7.0 Hal88XXGen TXBD/LLT/IMR/StopMBSSID/StopHW fix missing from compiled Hal88XXGen.c: '+token)
     h8197gtext=h8197ggen.read_text(errors='replace')
     for token in ('MappingTxQueue88XX;','CAMProgramEntry88XX_V1;'):
         if token not in h8197gtext:raise ValueError('v5.6.4 RTL8197G 15-queue / WPA2 CAM v1 fix missing from compiled Hal8197GGen.c: '+token)
     if 'wait_cnt = 0;' not in halfwsrc.read_text(errors='replace'):
         raise ValueError('v5.6.4 DownloadRsvdPage88XX wait_cnt reset missing from compiled Hal88XXFirmware.c')
+    iwpatch=tree/'package/network/utils/iwinfo/patches/999-rsd0614-wext-rtl8192cd-compat.patch'
+    if not iwpatch.is_file():raise ValueError('Missing staged libiwinfo WEXT compat patch: '+str(iwpatch))
+    iwpatchtext=iwpatch.read_text(errors='replace')
+    for token in ('wext_resolve_ifname','wext_parse_rtl_sta_info_file','wext_parse_rtl_mib_auth_file','.htmode','.survey','.lookup_phy'):
+        if token not in iwpatchtext:raise ValueError('Missing v5.7.0 iwinfo WEXT compat token: '+token)
     text=Path(log).read_text(errors='replace')
     boards=re.findall(r'BOARD="([^"]+)"[^\n]*SUBTARGET="rtl8197f"',text)
     if not boards or any(b!='RSD0614' for b in boards):raise ValueError('Loader BOARD not exclusively RSD0614: '+repr(boards))
@@ -338,9 +356,9 @@ def export(tree,out,log,port_fingerprint='NOT_RECORDED',project_commit='NOT_AVAI
         shutil.copyfile(path,dest/name)
         manifest.append({'name':name,'bytes':path.stat().st_size,'sha256':hashlib.sha256(path.read_bytes()).hexdigest()})
     provenance={'port_input_fingerprint':port_fingerprint,'project_commit':project_commit,'builder_image_id':builder_image_id}
-    kmod_audit={'vmlinux_ksymtab_count':len(ksymtab),'rtl8192cd_undef_symbol_count':len(ko_info['undef_symbols']),'rtl8192cd_missing_symbols':missing_syms,'rtl8192cd_bss_bytes':ko_info['bss_bytes'],'rtl8192cd_has_proc_init':'rtl8192cd_proc_init' in ko_info['defined_symbols'],'rtl8192cd_has_giwname':'rtl_giwname' in ko_info['defined_symbols'],'rtl8192cd_has_giwtxpow':'rtl_giwtxpow' in ko_info['defined_symbols']}
+    kmod_audit={'vmlinux_ksymtab_count':len(ksymtab),'rtl8192cd_undef_symbol_count':len(ko_info['undef_symbols']),'rtl8192cd_missing_symbols':missing_syms,'rtl8192cd_bss_bytes':ko_info['bss_bytes'],'rtl8192cd_has_proc_init':'rtl8192cd_proc_init' in ko_info['defined_symbols'],'rtl8192cd_has_giwname':'rtl_giwname' in ko_info['defined_symbols'],'rtl8192cd_has_giwtxpow':'rtl_giwtxpow' in ko_info['defined_symbols'],'rtl8192cd_has_wstats':'rtl8192cd_get_wireless_stats' in ko_info['defined_symbols'],'rtl8192cd_has_nat25':'nat25_handle_frame' in ko_info['defined_symbols']}
     (dest/'manifest.json').write_text(json.dumps({'files':manifest,'loader_board_values':boards,'provenance':provenance,'kmod_symbol_audit':kmod_audit},indent=2)+'\n')
-    print(f"GENERATED_KERNEL_CONFIG_AND_SOURCE: PASS; rtl8192cd_undef={len(ko_info['undef_symbols'])} missing=0 bss={ko_info['bss_bytes']}B proc_init=1 giwname=1 giwtxpow=1; hardware execution remains unverified")
+    print(f"GENERATED_KERNEL_CONFIG_AND_SOURCE: PASS; rtl8192cd_undef={len(ko_info['undef_symbols'])} missing=0 bss={ko_info['bss_bytes']}B proc_init=1 giwname=1 giwtxpow=1 wstats=1 nat25=1; hardware execution remains unverified")
 
 if __name__=='__main__':
     p=argparse.ArgumentParser();p.add_argument('tree');p.add_argument('out');p.add_argument('--log',required=True);p.add_argument('--port-fingerprint',default='NOT_RECORDED');p.add_argument('--project-commit',default='NOT_AVAILABLE');p.add_argument('--builder-image-id',default='NOT_RECORDED');a=p.parse_args()

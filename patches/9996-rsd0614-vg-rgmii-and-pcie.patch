@@ -422,7 +422,7 @@ index 1035361..6360db2 100644
  			pr_err("rtl819x DP: poll#%lu rx_done=%d rx_pkts=%lu CPUIISR=%08x USEDDSC=%u runout=%d\n",
  			       pc, rx_done, dev->stats.rx_packets, REG32(CPUIISR),
  			       used, runout);
-@@ -1351,7 +1398,14 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1351,7 +1398,18 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  {
  	rtl_nicTx_info nicTx;
  	dma_addr_t dma;
@@ -434,11 +434,15 @@ index 1035361..6360db2 100644
 +		dev->stats.tx_dropped++;
 +		return NETDEV_TX_OK;
 +	}
++	if (eth_skb_pad(skb)) {
++		dev->stats.tx_dropped++;
++		return NETDEV_TX_OK;
++	}
 +	len = skb->len;
  
  	pr_err_once("rtl819x DP: first TX (len=%u)\n", len);
  
-@@ -1364,19 +1418,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1364,19 +1422,6 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  
  	memset(&nicTx, 0, sizeof(nicTx));
  	nicTx.txIdx = 0;
@@ -458,7 +462,7 @@ index 1035361..6360db2 100644
  	/*
  	 * VID from the netdev's hwaccel VLAN tag — eth0.2 (LAN) -> VID 2,
  	 * eth0.1 (WAN) -> VID 1 (the M6.6 Fork A VLAN plan); an untagged frame
-@@ -1395,6 +1436,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
+@@ -1395,6 +1440,11 @@ static netdev_tx_t rtl819x_eth_xmit(struct sk_buff *skb, struct net_device *dev)
  		nicTx.vid = skb_vlan_tag_get(skb) & 0xfff;
  	else
  		nicTx.vid = 2;
@@ -470,7 +474,7 @@ index 1035361..6360db2 100644
  	nicTx.flags = 0;	/* direct-TX: swnic adds PKTHDR_USED_8197F|PKT_OUTGOING */
  
  	if (New_swNic_send(skb, (void *)(uintptr_t)dma, len, &nicTx) != 0) {
-@@ -1554,6 +1600,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
+@@ -1554,6 +1604,9 @@ static int rtl819x_eth_probe(struct platform_device *pdev)
  	else
  		eth_hw_addr_random(dev);
  

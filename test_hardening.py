@@ -932,16 +932,18 @@ class SourceTests(unittest.TestCase):
   for bad_r in ('jffs2reset','mount_root','firstboot','mtd '):self.assertNotIn(bad_r,rbtn)
   wsh=hs.BASE_FILES['lib/netifd/wireless/rtl8192cd.sh']
   self.assertTrue(wsh.startswith('#!/bin/sh\n'))
-  for tok in ('init_wireless_driver "$@"','_wireless_set_brsnoop_isolation() { return 0; }','add_driver rtl8192cd','lock "$LOCKFILE"','lock -u "$LOCKFILE"','/tmp/Wireless','/sys/class/net/','VHT80','HT40+|VHT40+) echo 2','HT40-|VHT40-) echo 1','HT40|VHT40)','rtl_derive_band','rtl_emit_country','${phy_ifname}_ampdu=1','${phy_ifname}_shortGI20M=1','${phy_ifname}_shortGI40M=1','${phy_ifname}_shortGI80M=1','rtl_validate_psk','EMPTY_SSID','coexist=0','coexist=1','wireless_set_retry 0','NO_VALID_VIF','BAD_MACADDR'):self.assertIn(tok,wsh)
+  for tok in ('init_wireless_driver "$@"','_wireless_set_brsnoop_isolation() { return 0; }','add_driver rtl8192cd','lock "$LOCKFILE"','lock -u "$LOCKFILE"','/tmp/Wireless','/sys/class/net/','VHT80','HT40+|VHT40+) echo 2','HT40-|VHT40-) echo 1','HT40|VHT40)','rtl_derive_band','rtl_emit_country','${phy_ifname}_ampdu=1','${phy_ifname}_shortGI20M=1','${phy_ifname}_shortGI40M=1','${phy_ifname}_shortGI80M=1','rtl_validate_psk','rtl_is_safe_value','rtl_normalize_bssid','rtl_sta_needs_nat25','rtl_down_radio','${ifname}_opmode=8','${ifname}_bssid2join=','${ifname}_nat25_disable=','${phy_ifname}_vap_enable=','${phy_ifname}-vxd','${phy_ifname}-va0','EMPTY_SSID','BAD_SSID','BAD_BSSID','TOO_MANY_STA','TOO_MANY_VIFS','coexist=0','coexist=1','wireless_set_retry 0','NO_VALID_VIF','BAD_MACADDR'):self.assertIn(tok,wsh)
   for bad in ('led_type','encmode=6','mib_all','phyBandSelect'):self.assertNotIn(bad,wsh)
   self.assertIn('[mib_rf_key_fields]',hs.BASE_FILES['usr/sbin/rsd0614-survey'])
  def test_m3_wifi_patch_and_package_safety_invariants(self):
   p=(ROOT/'patches/rtl8192cd-4.14-rsd0614.patch').read_text()
-  for req in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614','0xB8003000','0xB8003004','BIT(29)','CONFIG_MW5_LEGACY_WEXT','kernel_read(','CONFIG_RTL_TAROKO_OFFLOAD','LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)','LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)','CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600','GET_CHIP_VER(priv) == VERSION_8814B','coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2','InterruptMaskExt','mac_pton(ascii_mac, addr)','keeping fallback','int rtl_giwname(','(iw_handler) rtl_giwname,','int rtl_giwtxpow(','(iw_handler) rtl_giwtxpow,','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY','erq->length = 16;','memset(key, 0, 16);','netif_carrier_on(dev);','netif_carrier_off(dev);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','kfree(mibstr);','#define TX_HIQ_NUM_8814B                20','REG_HI16Q_TXBD_DESA_L','rsd0614_amsdu_txbd_dma','IE0_SET_TX_DESC_DATARATE(IE0_head, 4)','alloc_desc_bcn_addr','REG_P0HI16Q_HI17Q_TXBD_NUM','HCI_TX_DMA_QUEUE_CMD_V2','MappingTxQueue88XX;','CAMProgramEntry88XX_V1;','wait_cnt = 0;','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;','tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;'):self.assertIn(req,p)
+  for req in ('get_mtd_device_nm("cfg")','mtd_read(','put_mtd_device(','rockspace,rsd0614','0xB8003000','0xB8003004','BIT(29)','CONFIG_MW5_LEGACY_WEXT','kernel_read(','CONFIG_RTL_TAROKO_OFFLOAD','LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)','LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)','CONFIG_RTL_SHRINK_MEMORY_SIZE','#define NUM_TX_DESC         256','#define MAX_RX_BUF_LEN      2600','GET_CHIP_VER(priv) == VERSION_8814B','coherent_tx ? coherent_bd','HCI_TX_DMA_QUEUE_HI0_V2','InterruptMaskExt','mac_pton(ascii_mac, addr)','keeping fallback','int rtl_giwname(','(iw_handler) rtl_giwname,','int rtl_giwtxpow(','(iw_handler) rtl_giwtxpow,','struct iw_statistics *rtl8192cd_get_wireless_stats(','.get_wireless_stats = rtl8192cd_get_wireless_stats,','range->freq[i].i = priv->available_chnl[i];','VHT_MCS_DATA_RATE','IW_ENCODE_NOKEY','erq->length = 16;','memset(key, 0, 16);','netif_carrier_on(dev);','netif_carrier_off(dev);','SET_NETDEV_DEV(dev, priv->pshare->linux_dev);','kfree(mibstr);','#define TX_HIQ_NUM_8814B                20','REG_HI16Q_TXBD_DESA_L','rsd0614_amsdu_txbd_dma','IE0_SET_TX_DESC_DATARATE(IE0_head, 4)','alloc_desc_bcn_addr','REG_P0HI16Q_HI17Q_TXBD_NUM','HCI_TX_DMA_QUEUE_CMD_V2','MappingTxQueue88XX;','CAMProgramEntry88XX_V1;','wait_cnt = 0;','u2Byte HIQ_En = 0;','PrepareTXBDHandler(priv) == RT_STATUS_FAILURE','desc_dma_buf_virt_amsdu','dot11RsnIE.rsnielen = 0;','tmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;','rtl8192cd_init_one(NULL, NULL, wdev, -1)','rtl8192cd_init_one(NULL, NULL, wdev, vidx)','br_port_exists(netdev)','br_port->br->dev->dev_addr','skb_tailroom(skb) < 6','skb_cloned(skb) && pskb_expand_head(skb, 0, 0, GFP_ATOMIC)','use_vxd_diff_mac = 1;','skb_queue_purge(&priv->pshare->linux6_rx_delivery);','WLAN_HDR_A3_LEN + _TIMESTAMP_','PROBE_FRAME_SIZE','is_MAC_v4','BIT__ADDRCAM_ADDR((camIdx*8)+i)'):self.assertIn(req,p)
   for bad in ('mtd_write','mtd_erase','mtd_unlock','AUTOBURN 1','ERASECHIP'):self.assertNotIn(bad,p)
   mk=(ROOT/'packages/rtl8192cd-rsd0614/Makefile').read_text()
-  for req in ('KernelPackage/rtl8192cd-rsd0614','CONFIG_MW5_LEGACY_WEXT=y','CONFIG_RTL8192CD_LINUX6_BUS=y','CONFIG_WLAN_HAL_8197G=y','CONFIG_WLAN_HAL_8814BE=y','CONFIG_RTL_SHRINK_MEMORY_SIZE=y','CONFIG_PHY_EAT_40MHZ=y','AutoLoad,60,rtl8192cd'):self.assertIn(req,mk)
+  for req in ('KernelPackage/rtl8192cd-rsd0614','CONFIG_MW5_LEGACY_WEXT=y','CONFIG_RTL8192CD_LINUX6_BUS=y','CONFIG_WLAN_HAL_8197G=y','CONFIG_WLAN_HAL_8814BE=y','CONFIG_RTL_SHRINK_MEMORY_SIZE=y','CONFIG_PHY_EAT_40MHZ=y','CONFIG_RTL_CLIENT_MODE_SUPPORT=y','CONFIG_RTL_REPEATER_MODE_SUPPORT=y','CONFIG_VXD_DIFF_MAC=y','AutoLoad,60,rtl8192cd'):self.assertIn(req,mk)
   self.assertNotIn('CONFIG_MW5_OEM_WLAN_ORDER=y',mk)
+  iwp=(ROOT/'patches/iwinfo-wext-rsd0614.patch').read_text()
+  for req in ('wext_resolve_ifname','wext_valid_ifname','wext_parse_rtl_sta_info_file','wext_parse_rtl_mib_auth_file','/proc/%s/sta_info','/proc/%s/mib_auth','IW_QUAL_NOISE_INVALID','.htmode           = wext_get_htmode','.survey           = wext_get_survey','.lookup_phy       = wext_lookup_phy'):self.assertIn(req,iwp)
  def test_v563_rtl8192cd_netifd_helpers(self):
   wsh=hs.BASE_FILES['lib/netifd/wireless/rtl8192cd.sh']
   # Extract pure helper definitions between rtl_htmode_to_use40m and rtl_merge_fragments
@@ -980,21 +982,122 @@ class SourceTests(unittest.TestCase):
    'c_def="$(rtl_emit_country wlan0 "" 1)"\n'
    'printf "%s\\n" "$c_def" | grep -qx "wlan0_countrystr=US"\n'
    'printf "%s\\n" "$c_def" | grep -qx "wlan0_country2reg=1"\n'
+   'rtl_is_safe_value "RSD0614-OpenWrt"\n'
+   'rtl_is_safe_value "my\\\\rpass"\n'
+   '! rtl_is_safe_value \'bad"quote\'\n'
+   '! rtl_is_safe_value "$(printf "line1\\nline2")"\n'
+   '! rtl_is_safe_value "$(printf "bad\\rcr")"\n'
+   'test "$(rtl_normalize_bssid "AA:BB:CC:dd:ee:FF")" = "aabbccddeeff"\n'
+   '! rtl_normalize_bssid "not-a-mac" >/dev/null\n'
+   'test "$(rtl_sta_needs_nat25 0 wwan)" = "0"\n'
+   'test "$(rtl_sta_needs_nat25 1 lan)" = "1"\n'
+   'test "$(rtl_sta_needs_nat25 "" wwan)" = "1"\n'
    'rtl_validate_psk "rsd0614test"\n'
    'rtl_validate_psk "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"\n'
    '! rtl_validate_psk "short77"\n'
+   '! rtl_validate_psk \'bad"pass1234\'\n'
    '! rtl_validate_psk "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"\n'
    '! rtl_validate_psk "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0"\n'
    'out="$(rtl_emit_encryption wlan0 psk2+tkip rsd0614test)"\n'
    'printf "%s\\n" "$out" | grep -qx "wlan0_encmode=2"\n'
    'out2="$(rtl_emit_encryption wlan0 psk2 rsd0614test)"\n'
    'printf "%s\\n" "$out2" | grep -qx "wlan0_encmode=4"\n'
+   'out_psk="$(rtl_emit_encryption wlan0 psk rsd0614test)"\n'
+   'printf "%s\\n" "$out_psk" | grep -qx "wlan0_wpa_cipher=10"\n'
+   'printf "%s\\n" "$out_psk" | grep -qx "wlan0_encmode=4"\n'
    'out3="$(rtl_emit_encryption wlan0 psk2 "-n-dashpass")"\n'
    """printf "%s\\n" "$out3" | grep -qx 'wlan0_passphrase="-n-dashpass"'\n"""
    '! rtl_emit_encryption wlan0 psk2 short77 >/dev/null\n'
   )
   r=subprocess.run(['sh','-c',probe],capture_output=True,text=True)
   self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+ def test_v570_rtl8192cd_netifd_repeater_and_multissid_e2e(self):
+  wsh=hs.BASE_FILES['lib/netifd/wireless/rtl8192cd.sh']
+  # Strip the init_wireless_driver / add_driver lines and drive drv_rtl8192cd_setup with a minimal POSIX harness!
+  fn_body=wsh.replace('. /lib/functions.sh\n','').replace('. /lib/netifd/netifd-wireless.sh\n','').replace('init_wireless_driver "$@"\n','').replace('add_driver rtl8192cd\n','')
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td)
+   netdir=root/'sys_net'
+   for iface in ('wlan0','wlan0-va0','wlan0-vxd','wlan1','wlan1-vxd'):
+    (netdir/iface).mkdir(parents=True)
+   cfgdir=root/'Wireless'
+   iflog=root/'ifconfig.log'
+   viflog=root/'vifs.log'
+   fake_ifcfg=root/'fake_ifconfig'
+   fake_ifcfg.write_text(f'#!/bin/sh\necho "$*" >> "{iflog}"\n')
+   fake_ifcfg.chmod(0o755)
+   fake_uci=root/'uci'
+   fake_uci.write_text('#!/bin/sh\ncase "$*" in\n  *network.lan.type) echo bridge ;;\n  *network.wwan.type) echo "" ;;\nesac\n')
+   fake_uci.chmod(0o755)
+   harness=fn_body.replace('/sys/class/net/',str(netdir)+'/').replace('IFCONFIG=/sbin/ifconfig',f'IFCONFIG="{fake_ifcfg}"').replace('CFGDIR=/tmp/Wireless',f'CFGDIR="{cfgdir}"').replace('[ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s "$CFGDIR" /etc/Wireless',':')
+   driver=f"""set -eu
+PATH="{root}:$PATH"
+lock() {{ return 0; }}
+wireless_set_retry() {{ echo "RETRY $*" >> "{viflog}"; }}
+wireless_setup_failed() {{ echo "FAIL $*" >> "{viflog}"; }}
+wireless_setup_vif_failed() {{ echo "VIF_FAIL $*" >> "{viflog}"; }}
+wireless_add_vif() {{ echo "ADD_VIF $1 $2" >> "{viflog}"; }}
+wireless_set_up() {{ echo "SET_UP" >> "{viflog}"; }}
+json_select() {{ return 0; }}
+{harness}
+# Scenario 1: Same-Band Universal Repeater + Guest Multi-SSID on wlan0 (AP + Guest AP + routed STA on wwan)
+json_get_vars() {{
+  case "$1" in
+    channel) channel=36; htmode=VHT80; country=VN; hwmode=11a; band=""; phy_band=""; phy=wlan0; macaddr=""; beacon_int=""; dtim_period=""; noscan=0 ;;
+    mode)
+      case "$_cur_vif" in
+        v_ap1) mode=ap; ssid="Main-5G"; encryption=psk2; key="pass12345"; hidden=0; isolate=0; maxassoc=0; ifname=""; bssid=""; nat25_disable=""; macclone=0 ;;
+        v_ap2) mode=ap; ssid="Guest-5G"; encryption=psk2; key="guest1234"; hidden=0; isolate=1; maxassoc=8; ifname=""; bssid=""; nat25_disable=""; macclone=0 ;;
+        v_sta) mode=sta; ssid="Upstream-5G"; encryption=psk2; key="uppass123"; hidden=""; isolate=""; maxassoc=""; ifname=""; bssid="AA:BB:CC:11:22:33"; nat25_disable=""; macclone=0 ;;
+      esac
+      ;;
+  esac
+}}
+json_get_var() {{ eval "$1=''"; }}
+json_get_values() {{
+  if [ "$_cur_vif" = "v_sta" ]; then eval "$1=wwan"; else eval "$1=lan"; fi
+}}
+for_each_interface() {{
+  local fn="$2"
+  for _cur_vif in v_ap1 v_ap2 v_sta; do
+    "$fn" "$_cur_vif"
+  done
+}}
+drv_rtl8192cd_setup radio0
+# Scenario 2: Bridged STA directly in lan (auto NAT2.5 ON -> nat25_disable=0) on wlan1
+json_get_vars() {{
+  case "$1" in
+    channel) channel=auto; htmode=HT20; country=US; hwmode=11g; band=""; phy_band=""; phy=wlan1; macaddr=""; beacon_int=""; dtim_period=""; noscan=0 ;;
+    mode) mode=sta; ssid="Home-2G"; encryption=psk2; key="home12345"; hidden=""; isolate=""; maxassoc=""; ifname=""; bssid=""; nat25_disable=""; macclone=0 ;;
+  esac
+}}
+json_get_values() {{ eval "$1=lan"; }}
+for_each_interface() {{
+  local fn="$2"
+  _cur_vif=v_sta_br
+  "$fn" "$_cur_vif"
+}}
+drv_rtl8192cd_setup radio1
+"""
+   r=subprocess.run(['sh','-c',driver],capture_output=True,text=True)
+   self.assertEqual(r.returncode,0,r.stdout+r.stderr)
+   dat=(cfgdir/'RTL8192CD.dat').read_text()
+   for tok in (
+    'wlan0_opmode=16','wlan0_ssid="Main-5G"','wlan0_vap_enable=1',
+    'wlan0-va0_opmode=16','wlan0-va0_ssid="Guest-5G"','wlan0-va0_block_relay=1','wlan0-va0_stanum=8',
+    'wlan0-vxd_opmode=8','wlan0-vxd_ssid="Upstream-5G"','wlan0-vxd_bssid2join=aabbcc112233','wlan0-vxd_nat25_disable=1','wlan0-vxd_countrystr=VN','wlan0-vxd_ampdu=1',
+    'wlan1_opmode=8','wlan1_channel=0','wlan1_ssid="Home-2G"','wlan1_bssid2join=000000000000','wlan1_nat25_disable=0','wlan1_vap_enable=0',
+   ):
+    self.assertIn(tok,dat)
+   vifs=viflog.read_text()
+   for tok in ('ADD_VIF v_ap1 wlan0','ADD_VIF v_ap2 wlan0-va0','ADD_VIF v_sta wlan0-vxd','ADD_VIF v_sta_br wlan1'):
+    self.assertIn(tok,vifs)
+   calls=iflog.read_text().splitlines()
+   # Verify ordered down (vxd/va0 before wlan0) and ordered up (wlan0 before va0 & vxd)!
+   self.assertLess(calls.index('wlan0-vxd down'),calls.index('wlan0 down'))
+   self.assertLess(calls.index('wlan0-va0 down'),calls.index('wlan0 down'))
+   self.assertLess(calls.index('wlan0 up'),calls.index('wlan0-va0 up'))
+   self.assertLess(calls.index('wlan0 up'),calls.index('wlan0-vxd up'))
  def test_v564_reset_button_and_survey_redaction(self):
   rbtn=hs.BASE_FILES['etc/rc.button/reset']
   # Short press (<3s) must NOT invoke reboot; >=3s released invokes reboot cleanly.
@@ -1024,7 +1127,7 @@ class SourceTests(unittest.TestCase):
   s=hs.BASE_FILES['usr/sbin/rsd0614-survey']
   for bad in ('[:print:]','brctl showmacs','/proc/bus/input/devices','pgrep -a uhttpd'):
    self.assertNotIn(bad,s)
-  for req in ("tr -cd '\\040-\\176\\n'",'mtd2ro_cr6c_end=','mtd2ro_cr6c_end_m2_32=','scan4k off=','mtd2ro_last_non_ff_tail32=','rtl8822b','factory RF','ampdu shortGI20M shortGI40M shortGI80M countrystr regdomain','NET_BRIDGE_MCAST_TO_UCAST','BUTTON_HOTPLUG_AND_GPIO','gpio_button_hotplug'):
+  for req in ("tr -cd '\\040-\\176\\n'",'mtd2ro_cr6c_end=','mtd2ro_cr6c_end_m2_32=','scan4k off=','mtd2ro_last_non_ff_tail32=','rtl8822b','factory RF','ampdu shortGI20M shortGI40M shortGI80M countrystr regdomain','nat25_disable vap_enable','=== IWINFO ===','NET_BRIDGE_MCAST_TO_UCAST','BUTTON_HOTPLUG_AND_GPIO','gpio_button_hotplug'):
    self.assertIn(req,s)
   # Execute the exact POSIX sh cr6c-end arithmetic and octal tr filter used by flash-layout
   probe=(
@@ -1179,6 +1282,16 @@ int main(void) {
    "\t\t\t\tcrypto_modes.push(['wep-shared', _('WEP Shared Key'),  10]);\n"
    "\t\t\t\tcrypto_modes.push(['none',       _('No Encryption'),   0]);\n"
    "}\n"
+   "function join_confirm(enc) {\n"
+   "\tvar is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' })),\n"
+   "\t    is_sae = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'sae' }));\n"
+   "\treturn [is_psk, is_sae];\n"
+   "}\n"
+   "function join_modal(enc) {\n"
+   "\tvar is_psk = (enc && Array.isArray(enc.wpa) && L.toArray(enc.authentication).filter(function(a) { return a == 'psk' || a == 'sae' })),\n"
+   "\t    dummy = 0;\n"
+   "\treturn [is_psk, dummy];\n"
+   "}\n"
   )
   sh_text=(ROOT/'build-rsd0614-initramfs.sh').read_text()
   m=re.search(r'python3 - [^\n]+wireless\.js[^\n]+<<\'PY\'\n(.*?)\nPY\n',sh_text,re.S)
@@ -1195,11 +1308,14 @@ int main(void) {
     pr=subprocess.run(['python3',str(patcher),str(wjs)],capture_output=True,text=True)
     self.assertEqual(pr.returncode,0,pr.stdout+pr.stderr)
    patched=wjs.read_text()
-   for tok in ('htmodelist.VHT80 = true;',"uci.set('wireless', section_id, 'htmode', value[0] || 'NONE');","crypto_modes.push(['psk2',      'WPA2-PSK',                    35]);","CBIWifiCountryValue, 'country'","'dtim_period'","'isolate'","'maxassoc'","if (hwtype != 'rtl8192cd')"):
+   for tok in ('htmodelist.VHT80 = true;',"uci.set('wireless', section_id, 'htmode', value[0] || 'NONE');","crypto_modes.push(['psk2',      'WPA2-PSK',                    35]);","CBIWifiCountryValue, 'country'","'dtim_period'","'isolate'","'maxassoc'","'nat25_disable'","rtl_bssid.depends('mode', 'sta');","unshift('auto', 'auto', true);",".filter(function(a) { return a == 'sae' }).length > 0","if (hwtype != 'rtl8192cd')"):
     self.assertIn(tok,patched)
    if shutil.which('node'):
     nc=subprocess.run(['node','--check',str(wjs)],capture_output=True,text=True)
     self.assertEqual(nc.returncode,0,nc.stderr)
+    # Also execute join_confirm & join_modal in node to verify WPA2-PSK is NOT misclassified as SAE!
+    ev=subprocess.run(['node','-e',patched+'\nconst L={toArray:a=>Array.isArray(a)?a:(a==null?[]:[a])};const c=join_confirm({wpa:[2],authentication:["psk"]});const m=join_modal({wpa:[2],authentication:["psk"]});const o=join_modal({wpa:[],authentication:[]});if(c[0]!==true||c[1]!==false||m[0]!==true||o[0]!==false)process.exit(1);'],capture_output=True,text=True)
+    self.assertEqual(ev.returncode,0,ev.stderr)
  def test_vg_rgmii_pcie_patch_applies_and_validates(self):
   pci_fixture=(
    '/* pci-realtek fixture */\n'
@@ -1880,7 +1996,7 @@ static struct device g_dmadev;
 static struct net_device g_ndev_obj = { .dev = { .parent = &g_dmadev } };
 static struct net_device *g_ndev = &g_ndev_obj;
 static struct net_device *dev = &g_ndev_obj;
-static int g_alloc_skbs, g_free_skbs, g_linearize_calls;
+static int g_alloc_skbs, g_free_skbs, g_linearize_calls, g_eth_pad_calls;
 static u16 g_last_rx_vid;
 static struct sk_buff *netdev_alloc_skb(struct net_device *d, u32 sz) {
     (void)d; (void)sz;
@@ -1891,6 +2007,14 @@ static struct sk_buff *netdev_alloc_skb(struct net_device *d, u32 sz) {
 static void dev_kfree_skb_any(struct sk_buff *s) { assert(s); g_free_skbs++; munmap(s, sizeof(*s)); }
 static bool skb_is_nonlinear(const struct sk_buff *s) { return s->nonlinear; }
 static int skb_linearize(struct sk_buff *s) { g_linearize_calls++; if (s->linearize_fail) return -1; s->nonlinear = false; return 0; }
+static int eth_skb_pad(struct sk_buff *s) {
+    g_eth_pad_calls++;
+    if (s->len < 60) {
+        memset(s->data + s->len, 0, 60 - s->len);
+        s->len = 60;
+    }
+    return 0;
+}
 static void *kcalloc(size_t n, size_t sz, int gfp) { (void)gfp; return calloc(n, sz); }
 static void kfree(void *p) { free(p); }
 static u32 g_next_phys = 0x03e00000u;
@@ -2240,11 +2364,11 @@ int main(void) {
    wlen=value & 0x03
    return ((value & ~0x03)|(wlen-2)) if wlen in (2,3) else value
   self.assertEqual(translate(0x13),0x11);self.assertEqual(translate(0x83),0x81);self.assertEqual(translate(0x0b),0x09);self.assertEqual(translate(0x01),0x01)
- def test_builder_v565_volume_separate(self):
-  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v565-work',t);self.assertIn("-ne 'v5.6.5'",t);self.assertIn('rsd0614.work=v5.6.5',t)
-  for old_vol in ('rsd0614-openwrt-v564-work','rsd0614-openwrt-v563-work','rsd0614-openwrt-v562-work','rsd0614-openwrt-v561-work','rsd0614-openwrt-v560-work','rsd0614-openwrt-v551-work','rsd0614-openwrt-v550-work','rsd0614-openwrt-v542-work','rsd0614-openwrt-v541-work','rsd0614-openwrt-v540-work','rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
+ def test_builder_v570_volume_separate(self):
+  t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig');self.assertIn('rsd0614-openwrt-builder:v5.1',t);self.assertIn('rsd0614-openwrt-v570-work',t);self.assertIn("-ne 'v5.7.0'",t);self.assertIn('rsd0614.work=v5.7.0',t)
+  for old_vol in ('rsd0614-openwrt-v565-work','rsd0614-openwrt-v564-work','rsd0614-openwrt-v563-work','rsd0614-openwrt-v562-work','rsd0614-openwrt-v561-work','rsd0614-openwrt-v560-work','rsd0614-openwrt-v551-work','rsd0614-openwrt-v550-work','rsd0614-openwrt-v542-work','rsd0614-openwrt-v541-work','rsd0614-openwrt-v540-work','rsd0614-openwrt-v539-work','rsd0614-openwrt-v538-work','rsd0614-openwrt-v537-work','rsd0614-openwrt-v532-work','rsd0614-openwrt-v53-work','rsd0614-openwrt-v52-work'):self.assertNotIn(old_vol,t)
   self.assertIn('if (-not $HaveBuilder -or $RebuildBuilder)',t);self.assertNotIn('volume rm',t);self.assertNotIn('volume prune',t)
-  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v565-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.6.5');self.assertIn('rsd0614-openwrt-v564-work',hv['preserve_old_volumes'])
+  hv=json.loads((ROOT/'HOTFIX_VERSION.json').read_text());self.assertEqual(hv['volume'],'rsd0614-openwrt-v570-work');self.assertEqual(hv['volume_label'],'rsd0614.work=v5.7.0');self.assertIn('rsd0614-openwrt-v565-work',hv['preserve_old_volumes'])
  def test_builder_ps1_captures_image_id_before_recording_and_env(self):
   t=(ROOT/'Build-RSD0614.ps1').read_text(encoding='utf-8-sig')
   assign="$ImageId = (& docker image inspect $Image --format '{{.Id}}' | Out-String).Trim()"
@@ -2268,12 +2392,14 @@ int main(void) {
    if actual!=digest:mismatch.append((rel,digest,actual))
   self.assertEqual(missing,[],f'missing manifest files: {missing}')
   self.assertEqual(mismatch,[],f'manifest hash drift: {mismatch}')
- def test_v565_metadata_and_provenance_wiring(self):
-  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.6.5');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('ampdu=1',lock['intent']);self.assertIn('shortGI80M=1',lock['intent']);self.assertIn('countrystr',lock['intent']);self.assertIn('rtl_giwencode',lock['intent']);self.assertIn('rtl8367s_clear_stale_vlans',lock['intent']);self.assertIn('read-only',lock['intent'])
-  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.6.5-m3-final-ramboot\n')
-  self.assertIn("b'v5.6.5-m3-final-ramboot\\n'",(ROOT/'deep_audit.py').read_text())
-  self.assertIn('CONFIG_PACKAGE_uhttpd-mod-lua=y',(ROOT/'seed-rsd0614-initramfs.config').read_text())
-  build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build);self.assertIn('STAGE=wifi_driver_stage',build);self.assertIn('STAGE=feeds_stage',build);self.assertIn("hwtype == 'rtl8192cd'",build);self.assertIn("hwtype != 'rtl8192cd'",build);self.assertIn('htmodelist.VHT80 = true;',build);self.assertIn('DROPBEAR_DEFERRED_START_98: PASS',build)
+ def test_v570_metadata_and_provenance_wiring(self):
+  lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.7.0');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('UNIVERSAL_REPEATER',lock['intent']);self.assertIn('relayd',lock['intent']);self.assertIn('libiwinfo',lock['intent']);self.assertIn('eth_skb_pad',lock['intent']);self.assertIn('read-only',lock['intent'])
+  self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.7.0-m3-full-router-repeater-ramboot\n')
+  self.assertIn("b'v5.7.0-m3-full-router-repeater-ramboot\\n'",(ROOT/'deep_audit.py').read_text())
+  seed=(ROOT/'seed-rsd0614-initramfs.config').read_text()
+  for tok in ('CONFIG_PACKAGE_uhttpd-mod-lua=y','CONFIG_PACKAGE_relayd=y','CONFIG_PACKAGE_luci-proto-relay=y','CONFIG_PACKAGE_iwinfo=y','# CONFIG_KERNEL_CGROUPS is not set','# CONFIG_KERNEL_SWAP is not set'):
+   self.assertIn(tok,seed)
+  build=(ROOT/'build-rsd0614-initramfs.sh').read_text();self.assertIn('PORT_INPUT_FINGERPRINT.txt',build);self.assertIn('build-rsd0614-initramfs.sh',build);self.assertIn('--port-fingerprint',build);self.assertIn('--project-commit',build);self.assertIn('--builder-image-id',build);self.assertIn('STAGE=wifi_driver_stage',build);self.assertIn('STAGE=feeds_stage',build);self.assertIn('iwinfo-wext-rsd0614.patch',build);self.assertIn('luci-proto-relay',build);self.assertIn("hwtype == 'rtl8192cd'",build);self.assertIn("hwtype != 'rtl8192cd'",build);self.assertIn('htmodelist.VHT80 = true;',build);self.assertIn('DROPBEAR_DEFERRED_START_98: PASS',build)
   wrapper_raw=(ROOT/'Build-RSD0614.ps1').read_bytes();self.assertTrue(wrapper_raw.startswith(b'\xef\xbb\xbf'))
   wrapper=wrapper_raw.decode('utf-8-sig');self.assertIn('BUILDER_IMAGE_ID=',wrapper)
   workflow=(ROOT/'.github/workflows/build-initramfs.yml').read_text();self.assertIn('BUILDER_IMAGE_ID=',workflow);self.assertIn('PROJECT_COMMIT=$GITHUB_SHA',workflow);self.assertIn("default: '4'",workflow);self.assertIn("JOBS=${{ inputs.jobs || '4' }}",workflow);self.assertIn('actions/cache@v4',workflow);self.assertIn('-e CACHE_DIR=/cache',workflow)
@@ -2311,7 +2437,7 @@ class TreeTransactionTests(unittest.TestCase):
   self.assertEqual(external.read_text(),'preserve')
  def test_backup_inside_source_refused(self):
   with self.assertRaises(ValueError):hs.harden(self.tree,ROOT,self.tree/'audit',expected=self.head)
-def make_elf32_le_mips_ko(undef_syms=('printk','kmalloc'),defined_syms=('rtl8192cd_proc_init','rtl_giwname','rtl_giwtxpow'),license_str='GPL',bss_size=65536):
+def make_elf32_le_mips_ko(undef_syms=('printk','kmalloc'),defined_syms=('rtl8192cd_proc_init','rtl_giwname','rtl_giwtxpow','rtl8192cd_get_wireless_stats','nat25_handle_frame'),license_str='GPL',bss_size=65536):
  shstr=bytearray(b'\x00')
  def add_s(buf,s):
   off=len(buf);buf.extend(s.encode('ascii')+b'\x00');return off
@@ -2362,21 +2488,28 @@ class ExportEvidenceTests(unittest.TestCase):
   (wifidir/'rtl8192cd.ko').write_bytes(make_elf32_le_mips_ko())
   (wifidir/'linux6/rtl8192cd_board.c').write_text('get_mtd_device_nm("cfg")\nmtd_read(mtd, 0, 0x10000, &retlen, buf)\nput_mtd_device(mtd)\nrockspace,rsd0614\nmac_pton(ascii_mac, addr)\nkeeping fallback\n')
   (wifidir/'linux6/rtl8197f_soc.c').write_text('0xB8003000\n0xB8003004\n& ~BIT(29)\nBIT(29)\n')
+  (wifidir/'linux6/rtl8192cd_core.c').write_text('rtl8192cd_init_one(NULL, NULL, wdev, -1)\nrtl8192cd_init_one(NULL, NULL, wdev, vidx)\n')
+  (wifidir/'core/core.h').write_text('#define GET_BR_PORT(netdev) (br_port_exists(netdev) ? br_port_get_rcu(netdev) : NULL)\n')
+  (wifidir/'8192cd_br_ext.c').write_text('br_port->br->dev->dev_addr\nif (skb_tailroom(skb) < 6) return;\n')
+  (wifidir/'8192cd_sme.c').write_text('unsigned int wf_len = (pfrinfo->pktlen > PROBE_FRAME_SIZE) ? PROBE_FRAME_SIZE : pfrinfo->pktlen;\n')
   (wifidir/'rtl8197f_linux_compat.h').write_text('/* compat */\n')
-  (wifidir/'core/8192cd_core_tx.c').write_text('#if ((LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,140) && LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)) || LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0))\n')
+  (wifidir/'core/8192cd_core_tx.c').write_text('#if ((LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,140) && LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0)) || LINUX_VERSION_CODE >= KERNEL_VERSION(4,16,0))\nif (skb_cloned(skb) && pskb_expand_head(skb, 0, 0, GFP_ATOMIC))\n')
   (wifidir/'8192cd_cfg.h').write_text('#if (!defined(CONFIG_RTL8192CD_LINUX6_BUS) || (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)))\n#define _INCLUDE_PROC_FS_\n#endif\n#ifdef CONFIG_RTL_SHRINK_MEMORY_SIZE\n#define NUM_TX_DESC         256\n#define MAX_RX_BUF_LEN      2600\n#endif\n')
-  (wifidir/'8192cd_osdep.c').write_text('GET_CHIP_VER(priv) == VERSION_8814B\n!defined(CONFIG_RTL8192CD_LINUX6_BUS)\n__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)\n(void)REG32(0xB8000064);\nSET_NETDEV_DEV(dev, priv->pshare->linux_dev);\nu2Byte HIQ_En = 0;\nPrepareTXBDHandler(priv) == RT_STATUS_FAILURE\ndesc_dma_buf_virt_amsdu\ndot11RsnIE.rsnielen = 0;\nnetif_carrier_on(dev);\nnetif_carrier_off(dev);\n')
-  (wifidir/'8192cd_comapi.c').write_text('int rtl_giwname(struct net_device *dev, struct iw_request_info *info, union iwreq_data *wrqu, char *extra) { return 0; }\nint rtl_giwtxpow(struct net_device *dev, struct iw_request_info *info, union iwreq_data *wrqu, char *extra) { return 0; }\nrange->freq[i].i = priv->available_chnl[i];\nVHT_MCS_DATA_RATE\nIW_ENCODE_NOKEY\nerq->length = 16;\nmemset(key, 0, 16);\n')
-  (wifidir/'8192cd_ioctl.c').write_text('\t(iw_handler) rtl_giwname,\n\t(iw_handler) rtl_giwtxpow,\n')
+  (wifidir/'8192cd_osdep.c').write_text('GET_CHIP_VER(priv) == VERSION_8814B\n!defined(CONFIG_RTL8192CD_LINUX6_BUS)\n__raw_readl((void __iomem *)0xB8003000UL) | BIT(29)\n(void)REG32(0xB8000064);\nSET_NETDEV_DEV(dev, priv->pshare->linux_dev);\nu2Byte HIQ_En = 0;\nPrepareTXBDHandler(priv) == RT_STATUS_FAILURE\ndesc_dma_buf_virt_amsdu\ndot11RsnIE.rsnielen = 0;\nnetif_carrier_on(dev);\nnetif_carrier_off(dev);\nuse_vxd_diff_mac = 1;\nskb_queue_purge(&priv->pshare->linux6_rx_delivery);\n')
+  (wifidir/'8192cd_comapi.c').write_text('struct iw_statistics *rtl8192cd_get_wireless_stats(struct net_device *net_dev) { return NULL; }\nint rtl_giwname(struct net_device *dev, struct iw_request_info *info, union iwreq_data *wrqu, char *extra) { return 0; }\nint rtl_giwtxpow(struct net_device *dev, struct iw_request_info *info, union iwreq_data *wrqu, char *extra) { return 0; }\nrange->freq[i].i = priv->available_chnl[i];\nVHT_MCS_DATA_RATE\nIW_ENCODE_NOKEY\nerq->length = 16;\nmemset(key, 0, 16);\nWLAN_HDR_A3_LEN + _TIMESTAMP_\nbss_backup\nIW_QUAL_DBM\n')
+  (wifidir/'8192cd_ioctl.c').write_text('\t(iw_handler) rtl_giwname,\n\t(iw_handler) rtl_giwtxpow,\n\t.get_wireless_stats = rtl8192cd_get_wireless_stats,\n')
   (wifidir/'WlanHAL/RTL88XX/RTL8814B/Hal8814BCfg.h').write_text('#define TX_HIQ_NUM_8814B                20\n')
   (wifidir/'WlanHAL/RTL88XX/Hal88XXTxDesc.c').write_text('dma_addr_t txbd_dma = coherent_tx ? coherent_bd : 0;\nu4Byte hi0_q = HCI_TX_DMA_QUEUE_HI0_V2;\nREG_HI16Q_TXBD_DESA_L\nrsd0614_amsdu_txbd_dma\nIE0_SET_TX_DESC_DATARATE(IE0_head, 4)\nalloc_desc_bcn_addr\n')
-  (wifidir/'WlanHAL/RTL88XX/Hal88XXGen.c').write_text('Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];\nREG_P0HI16Q_HI17Q_TXBD_NUM\nHCI_TX_DMA_QUEUE_CMD_V2\ntmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;\n')
+  (wifidir/'WlanHAL/RTL88XX/Hal88XXGen.c').write_text('Adapter->pshare->InterruptMaskExt = _GET_HAL_DATA(Adapter)->IntMask[1];\nREG_P0HI16Q_HI17Q_TXBD_NUM\nHCI_TX_DMA_QUEUE_CMD_V2\ntmp1byte = HAL_RTL_R8(REG_AUTO_LLT_V1) | BIT0;\nis_MAC_v4\nBIT__ADDRCAM_ADDR((camIdx*8)+i)\n')
   (wifidir/'WlanHAL/RTL88XX/RTL8197G/Hal8197GGen.c').write_text('MappingTxQueue88XX;\nCAMProgramEntry88XX_V1;\n')
   (wifidir/'WlanHAL/RTL88XX/Hal88XXFirmware.c').write_text('wait_cnt = 0;\n')
-  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');sheipa=self.linux/'drivers/spi/spi-sheipa.c';sheipa.parent.mkdir(parents=True);sheipa.write_text('spi-sheipa: getdr RFNE timeout\nspi-sheipa: spi_flash_wait_busy TIMEOUT\nspi-sheipa: flash_wait_busy TIMEOUT\nif (clk_div < 28)\n\tclk_div = 28;\n');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');survey=self.linux/'arch/mips/realtek/rsd0614_survey.c';survey.write_bytes(self.patched_survey);eth=self.linux/'drivers/net/ethernet/rtl819x/rtl819x-eth.c';eth.parent.mkdir(parents=True);eth.write_text('New_swNic_program_regs(false);\nNew_swNic_program_regs(true);\nREG32(MACCTRL1) |= CF_CMAC_CLK_SEL;\niimr &= ~(PKTHDR_DESC_RUNOUT_IE_ALL | MBUF_DESC_RUNOUT_IE_ALL);\nbool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);\nREG32(0xB8000850) = 0x579fff7fu;\nu32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);\n(v & ~(0x7Fu << 4)) | (0x48u << 4);\n(v & ~(0x3Fu << 12)) | (1u << 12);\nREG32(RTL819X_SWCORE_BASE + 0x457C) = 0x00fc00ffu;\nREG32(RTL819X_SWCORE_BASE + 0x45C4) = 0x00fc00ffu;\nif (used > 400 && rx == stall_prev_rx)\nif (hang_cnt >= 25)\nbool pressure = runout || used > 400;\nif (skb_is_nonlinear(skb) && skb_linearize(skb))\nif (of_machine_is_compatible("rockspace,rsd0614"))\n\tfabric_gw_rearm = 0;\nstatic int dp_heartbeat;\nmodule_param(dp_heartbeat, int, 0644);\nelse if (beat && (dp_heartbeat || pc == 1024))\n');swnic=self.linux/'drivers/net/ethernet/rtl819x/rtl819x_swnic.c';swnic.write_text('struct rtl_new_rx_desc\nstruct rtl_new_tx_desc\nBUILD_BUG_ON(sizeof(struct rtl_new_rx_desc) != 24);\nBUILD_BUG_ON(sizeof(struct rtl_new_tx_desc) != 24);\nbool rtl819x_use_new_desc(void)\nvoid New_swNic_program_regs(bool post_start)\nTX_PKTHDR_SHORTCUT_LSO\nREG32(DMA_CR1) = (txCnt - 1) * sizeof(struct rtl_new_tx_desc);\nREG32(DMA_CR4) = TX_RING0_TAIL_AWARE;\nNew_swNic_receive_newdesc\nif (!new_desc_active)\nREG32(CPUICR) |= TXFD;\n');regs=self.linux/'drivers/net/ethernet/rtl819x/rtl819x_regs.h';regs.write_text('#define CPUQDM0\n#define TX_PKTHDR_SHORTCUT_LSO\n#define CF_RXDESC_OFFSET\n#define CF_TXDESC_OFFSET\n#define MACCTRL1\n#define CF_CMAC_CLK_SEL\n');sw8367=self.linux/'drivers/net/phy/rtl8367b.c';sw8367.parent.mkdir(parents=True);sw8367.write_text('static int rtl8367s_set_max_len_1552(struct rtl8366_smi *smi)\n{\n\trtl8366_smi_rmwr(smi, 0x1200, 0x6000, 0x6000);\n\trtl8366_smi_rmwr(smi, 0x0884, 0x0003, 0x0003);\n\trtl8366_smi_write_reg(smi, 0x088c, 0x0610);\n\trtl8366_smi_write_reg(smi, 0x088d, 0x0610);\n\treturn 0;\n}\nstatic int rtl8367s_clear_stale_vlans(struct rtl8366_smi *smi)\n{\n\treturn 0;\n}\n(void)rtl8367s_set_max_len_1552(smi);\nerr = rtl8367s_set_max_len_1552(smi);\nerr = rtl8367s_clear_stale_vlans(smi);\n');pci=self.linux/'arch/mips/pci/pci-realtek.c';pci.parent.mkdir(parents=True);pci.write_text('if ((sr_r32(REALTEK_SR_REG_ID) & 0xFFFFF000u) == 0x81970000u)\n\trealtek_pcie_mdio_write(rpc, 0x08, 0x3101);\nmdelay(290);\nfor (attempt = 1; attempt <= 3; attempt++)\nsr_w32(val & ~BIT(14), REALTEK_SR_CLKMANAGE);\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
+  iwpatch=self.tree/'package/network/utils/iwinfo/patches/999-rsd0614-wext-rtl8192cd-compat.patch'
+  iwpatch.parent.mkdir(parents=True,exist_ok=True)
+  iwpatch.write_bytes((ROOT/'patches/iwinfo-wext-rsd0614.patch').read_bytes())
+  src=self.linux/'drivers/mtd/spi-nor/spi-nor.c';src.parent.mkdir(parents=True);src.write_text('{ "bh25q64", INFO(0x684017, 0, 65536, 128, 0x2008) },');sheipa=self.linux/'drivers/spi/spi-sheipa.c';sheipa.parent.mkdir(parents=True);sheipa.write_text('spi-sheipa: getdr RFNE timeout\nspi-sheipa: spi_flash_wait_busy TIMEOUT\nspi-sheipa: flash_wait_busy TIMEOUT\nif (clk_div < 28)\n\tclk_div = 28;\n');irq=self.linux/'arch/mips/realtek/irq.c';irq.parent.mkdir(parents=True);irq.write_text(hs.IRQ_SAFE_BLOCK+'\n');survey=self.linux/'arch/mips/realtek/rsd0614_survey.c';survey.write_bytes(self.patched_survey);eth=self.linux/'drivers/net/ethernet/rtl819x/rtl819x-eth.c';eth.parent.mkdir(parents=True);eth.write_text('New_swNic_program_regs(false);\nNew_swNic_program_regs(true);\nREG32(MACCTRL1) |= CF_CMAC_CLK_SEL;\niimr &= ~(PKTHDR_DESC_RUNOUT_IE_ALL | MBUF_DESC_RUNOUT_IE_ALL);\nbool is_vg = ((REG32(0xB8000000) & 0xFFFFF000u) == 0x81970000u);\nREG32(0xB8000850) = 0x579fff7fu;\nu32 rx_delay = (p0_rx_delay >= 0) ? ((u32)p0_rx_delay & 7u) : (is_vg ? 7u : 5u);\n(v & ~(0x7Fu << 4)) | (0x48u << 4);\n(v & ~(0x3Fu << 12)) | (1u << 12);\nREG32(RTL819X_SWCORE_BASE + 0x457C) = 0x00fc00ffu;\nREG32(RTL819X_SWCORE_BASE + 0x45C4) = 0x00fc00ffu;\nif (used > 400 && rx == stall_prev_rx)\nif (hang_cnt >= 25)\nbool pressure = runout || used > 400;\nif (skb_is_nonlinear(skb) && skb_linearize(skb))\nif (eth_skb_pad(skb))\nif (of_machine_is_compatible("rockspace,rsd0614"))\n\tfabric_gw_rearm = 0;\nstatic int dp_heartbeat;\nmodule_param(dp_heartbeat, int, 0644);\nelse if (beat && (dp_heartbeat || pc == 1024))\n');swnic=self.linux/'drivers/net/ethernet/rtl819x/rtl819x_swnic.c';swnic.write_text('struct rtl_new_rx_desc\nstruct rtl_new_tx_desc\nBUILD_BUG_ON(sizeof(struct rtl_new_rx_desc) != 24);\nBUILD_BUG_ON(sizeof(struct rtl_new_tx_desc) != 24);\nbool rtl819x_use_new_desc(void)\nvoid New_swNic_program_regs(bool post_start)\nTX_PKTHDR_SHORTCUT_LSO\nREG32(DMA_CR1) = (txCnt - 1) * sizeof(struct rtl_new_tx_desc);\nREG32(DMA_CR4) = TX_RING0_TAIL_AWARE;\nNew_swNic_receive_newdesc\nif (!new_desc_active)\nREG32(CPUICR) |= TXFD;\n');regs=self.linux/'drivers/net/ethernet/rtl819x/rtl819x_regs.h';regs.write_text('#define CPUQDM0\n#define TX_PKTHDR_SHORTCUT_LSO\n#define CF_RXDESC_OFFSET\n#define CF_TXDESC_OFFSET\n#define MACCTRL1\n#define CF_CMAC_CLK_SEL\n');sw8367=self.linux/'drivers/net/phy/rtl8367b.c';sw8367.parent.mkdir(parents=True);sw8367.write_text('static int rtl8367s_set_max_len_1552(struct rtl8366_smi *smi)\n{\n\trtl8366_smi_rmwr(smi, 0x1200, 0x6000, 0x6000);\n\trtl8366_smi_rmwr(smi, 0x0884, 0x0003, 0x0003);\n\trtl8366_smi_write_reg(smi, 0x088c, 0x0610);\n\trtl8366_smi_write_reg(smi, 0x088d, 0x0610);\n\treturn 0;\n}\nstatic int rtl8367s_clear_stale_vlans(struct rtl8366_smi *smi)\n{\n\treturn 0;\n}\n(void)rtl8367s_set_max_len_1552(smi);\nerr = rtl8367s_set_max_len_1552(smi);\nerr = rtl8367s_clear_stale_vlans(smi);\n');pci=self.linux/'arch/mips/pci/pci-realtek.c';pci.parent.mkdir(parents=True);pci.write_text('if ((sr_r32(REALTEK_SR_REG_ID) & 0xFFFFF000u) == 0x81970000u)\n\trealtek_pcie_mdio_write(rpc, 0x08, 0x3101);\nmdelay(290);\nfor (attempt = 1; attempt <= 3; attempt++)\nsr_w32(val & ~BIT(14), REALTEK_SR_CLKMANAGE);\n');uart=self.linux/'include/uapi/linux/serial_reg.h';uart.parent.mkdir(parents=True);uart.write_bytes(self.serial_reg_bytes);dw=self.linux/'drivers/tty/serial/8250/8250_dw.c';dw.parent.mkdir(parents=True);dw.write_bytes(self.patched_dw8250);self.log=self.root/'build.log';self.log.write_text('BOARD="RSD0614" SUBTARGET="rtl8197f"\n')
  def tearDown(self):self.tmp.cleanup()
  def test_export_only_records_fixture_not_boot_success(self):
-  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),21);self.assertEqual(manifest['loader_board_values'],['RSD0614']);self.assertEqual(manifest['kmod_symbol_audit']['rtl8192cd_missing_symbols'],[]);self.assertEqual(manifest['kmod_symbol_audit']['rtl8192cd_undef_symbol_count'],2);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_proc_init']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_giwname']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_giwtxpow'])
+  from export_build_evidence import export;export(self.tree,self.out,self.log);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(len(manifest['files']),21);self.assertEqual(manifest['loader_board_values'],['RSD0614']);self.assertEqual(manifest['kmod_symbol_audit']['rtl8192cd_missing_symbols'],[]);self.assertEqual(manifest['kmod_symbol_audit']['rtl8192cd_undef_symbol_count'],2);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_proc_init']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_giwname']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_giwtxpow']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_wstats']);self.assertTrue(manifest['kmod_symbol_audit']['rtl8192cd_has_nat25'])
  def test_export_records_provenance(self):
   from export_build_evidence import export;export(self.tree,self.out,self.log,port_fingerprint='a'*64,project_commit='b'*40,builder_image_id='sha256:'+'c'*64);manifest=json.loads((self.out/'kernel-evidence/manifest.json').read_text());self.assertEqual(manifest['provenance'],{'port_input_fingerprint':'a'*64,'project_commit':'b'*40,'builder_image_id':'sha256:'+'c'*64})
  def test_wrong_board_rejected(self):

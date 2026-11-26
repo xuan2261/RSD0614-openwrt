@@ -222,7 +222,7 @@ def audit(image):
     for name in byname:
         low=name.lower()
         if any(x in low for x in ('dir842','asic-wifi-settle','09_fix-header','30-hwnat','rtw88','rtl8822be')):forbidden.append(name)
-    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.6.5-m3-final-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
+    check('no-donor-userspace',not forbidden,', '.join(forbidden));marker=byname.get('etc/rsd0614-diagnostic-mode',{}).get('data');check('diagnostic-mode-marker',marker==b'v5.7.0-m3-full-router-repeater-ramboot\n');lowmem=byname.get('etc/sysctl.d/31-rsd0614-lowmem.conf',{}).get('data',b'');check('lowmem-min-free-kbytes-sysctl',lowmem==b'vm.min_free_kbytes=2048\n');done=byname.get('etc/init.d/done',{}).get('data',b'');check('diagnostic-done-no-mount-root',bool(done) and b'mount_root' not in done and b'set_state done' in done);boot=byname.get('etc/init.d/boot',{}).get('data',b'');check('diagnostic-boot-no-mount-root',bool(boot) and b'mount_root' not in boot and b'config_generate' in boot and b'kmodloader' in boot);defaultnet=byname.get('etc/board.d/99-default_network',{}).get('data',b'');check('no-default-physical-interface-synthesis',bool(defaultnet) and b"ucidef_set_interface_lan 'eth0'" not in defaultnet and b'eth1' not in defaultnet and b'board_config_flush' in defaultnet);preinit_mount=byname.get('lib/preinit/80_mount_root',{}).get('data',b'');check('preinit-mount-root-initramfs-guard',b'[ "$INITRAMFS" = "1" ] || boot_hook_add preinit_main do_mount_root' in preinit_mount)
     boardnet=byname.get('etc/board.d/02_network',{}).get('data',b'');ucinet=byname.get('etc/uci-defaults/99-rsd0614-network',{}).get('data',b'');netinit=byname.get('etc/init.d/rsd0614-net');rstbtn_sh=byname.get('etc/rc.button/reset')
     check('rsd0614-wired-network-config',
           b'ucidef_set_interfaces_lan_wan "eth0.2" "eth0.1"' in boardnet and
@@ -242,6 +242,7 @@ def audit(image):
     wifimod=byname.get('lib/modules/4.14.187/rtl8192cd.ko');wifiauto=byname.get('etc/modules.d/60-rtl8192cd-rsd0614',{}).get('data',b'')
     wifish=byname.get('lib/netifd/wireless/rtl8192cd.sh')
     luci_wjs=byname.get('www/luci-static/resources/view/network/wireless.js',{}).get('data',b'')
+    libiwinfo=byname.get('usr/lib/libiwinfo.so',{}).get('data',b'')
     dropbear_init=byname.get('etc/init.d/dropbear',{}).get('data',b'')
     has_iwpriv=('usr/sbin/iwpriv' in byname) or ('sbin/iwpriv' in byname)
     check('rsd0614-m3-dualband-wifi-and-luci',
@@ -255,12 +256,24 @@ def audit(image):
           b'${phy_ifname}_shortGI40M=1' in wifish['data'] and
           b'${phy_ifname}_shortGI80M=1' in wifish['data'] and
           b'rtl_emit_country' in wifish['data'] and
+          b'${ifname}_opmode=8' in wifish['data'] and
+          b'${ifname}_bssid2join=' in wifish['data'] and
+          b'${ifname}_nat25_disable=' in wifish['data'] and
+          b'${phy_ifname}_vap_enable=' in wifish['data'] and
+          b'rtl_down_radio' in wifish['data'] and b'rtl_sta_needs_nat25' in wifish['data'] and
+          b'-vxd' in wifish['data'] and b'-va0' in wifish['data'] and
           b'/tmp/Wireless' in wifish['data'] and b'lock ' in wifish['data'] and
           b'/sys/class/net/' in wifish['data'] and b'mib_all' not in wifish['data'] and
           b'HT40+|VHT40+) echo 2' in wifish['data'] and
           b'rtl_derive_band' in wifish['data'] and b'rtl_validate_psk' in wifish['data'] and
           b'encmode=6' not in wifish['data'] and b'led_type' not in wifish['data'] and
           b'rtl8192cd' in luci_wjs and b'VHT80' in luci_wjs and
+          b"rtl_bssid.depends('mode', 'sta')" in luci_wjs and
+          b"unshift('auto', 'auto', true)" in luci_wjs and
+          b".filter(function(a) { return a == 'sae' }).length > 0" in luci_wjs and
+          b'/proc/%s/sta_info' in libiwinfo and b'/proc/%s/mib_auth' in libiwinfo and
+          'usr/sbin/relayd' in byname and 'usr/bin/iwinfo' in byname and
+          'www/luci-static/resources/protocol/relay.js' in byname and
           b'RSD0614-OpenWrt-5G' in ucinet and b'RSD0614-OpenWrt-2G' in ucinet and
           b"country='US'" in ucinet and
           (not dropbear_init or b'START=98' in dropbear_init) and
@@ -275,8 +288,10 @@ def audit(image):
             has_proc=('rtl8192cd_proc_init' in ko_info['defined_symbols']) or ('proc_create_data' in ko_info['undef_symbols'] and b'\x00mib_all\x00' in wifimod['data'])
             has_giwname=('rtl_giwname' in ko_info['defined_symbols']) or (b'\x00IEEE 802.11\x00' in wifimod['data'])
             has_giwtxpow=('rtl_giwtxpow' in ko_info['defined_symbols']) or (b'\x00rtl_giwtxpow\x00' in wifimod['data'])
-            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and has_proc and has_giwname and has_giwtxpow and ko_info['bss_bytes']<=1536*1024)
-            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} proc_init={int(has_proc)} giwname={int(has_giwname)} giwtxpow={int(has_giwtxpow)} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
+            has_wstats=('rtl8192cd_get_wireless_stats' in ko_info['defined_symbols']) or (b'\x00rtl8192cd_get_wireless_stats\x00' in wifimod['data'])
+            has_nat25=('nat25_handle_frame' in ko_info['defined_symbols']) or (b'\x00nat25_handle_frame\x00' in wifimod['data'])
+            ko_ok=(not missing_kstr and 'sk_pacing_shift_update' not in ko_info['undef_symbols'] and has_proc and has_giwname and has_giwtxpow and has_wstats and has_nat25 and ko_info['bss_bytes']<=1536*1024)
+            ko_detail=f"undef={len(ko_info['undef_symbols'])} missing={len(missing_kstr)} proc_init={int(has_proc)} giwname={int(has_giwname)} giwtxpow={int(has_giwtxpow)} wstats={int(has_wstats)} nat25={int(has_nat25)} bss={ko_info['bss_bytes']}B" + ('' if not missing_kstr else ' missing_syms='+','.join(missing_kstr[:8]))
         except (OSError,ValueError,struct.error) as e:
             ko_ok=False;ko_detail=str(e)
     check('rtl8192cd-elf-ksymtab-and-bss-guard',ko_ok,ko_detail)

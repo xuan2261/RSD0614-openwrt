@@ -345,18 +345,23 @@ print_wifi() {
 		echo "=== IWCONFIG ==="
 		iwconfig 2>&1 || true
 	fi
+	if command -v iwinfo >/dev/null 2>&1; then
+		echo "=== IWINFO ==="
+		iwinfo 2>&1 || true
+	fi
 	if command -v iwpriv >/dev/null 2>&1; then
 		echo "=== IWPRIV_NONSECRET ==="
-		for iface in wlan0 wlan1; do
-			[ -d "/sys/class/net/$iface" ] || continue
-			for mib in channel band phyBandSelect use40M 2ndchoffset ampdu shortGI20M shortGI40M shortGI80M countrystr regdomain block_relay encmode psk_enable; do
+		for d in /sys/class/net/wlan*; do
+			[ -d "$d" ] || continue
+			iface="${d##*/}"
+			for mib in opmode channel band phyBandSelect use40M 2ndchoffset ampdu shortGI20M shortGI40M shortGI80M countrystr regdomain block_relay nat25_disable vap_enable encmode psk_enable; do
 				val="$(iwpriv "$iface" get_mib "$mib" 2>/dev/null | sed -E 's/^.*get_mib:[[:space:]]*//' | tr '\\n' ' ' | sed 's/[[:space:]]*$//')"
 				[ -n "$val" ] && printf "%s %s=%s\\n" "$iface" "$mib" "$val"
 			done
 		done
 	fi
 	echo "=== WIFI_PROC_SUMMARY ==="
-	for d in /proc/wlan0 /proc/wlan1; do
+	for d in /proc/wlan*; do
 		[ -d "$d" ] || continue
 		echo "--- $d ---"
 		if [ -r "$d/mib_rf" ]; then
@@ -493,7 +498,9 @@ exit 0
 WIFI_NETIFD_SCRIPT="""#!/bin/sh
 # Atomic dual-band netifd wireless handler for Rock Space RSD0614 V1.0.
 # Drives both wlan0 (PCIe0 RTL8814BR 5 GHz) and wlan1 (on-SoC RTL8197G 2.4 GHz)
-# via pinned Realtek SDK v3.6.0 rtl8192cd (WEXT + in-kernel WPA2-PSK).
+# via pinned Realtek SDK v3.6.0 rtl8192cd (WEXT + in-kernel WPA/WPA2-PSK):
+# supports AP, STA (routed WISP / relayd / NAT2.5 bridged), Same-Band Universal
+# Repeater (wlanX AP + wlanX-vxd STA), and Multi-SSID Guest Wi-Fi (wlanX-va0).
 # Unverified panel LED GPIOs are intentionally never touched.
 . /lib/functions.sh
 . /lib/netifd/netifd-wireless.sh
@@ -516,12 +523,11 @@ drv_rtl8192cd_init_device_config() {
 	config_add_string country
 	config_add_int band phy_band
 	config_add_int beacon_int dtim_period
-	config_add_boolean noscan
 }
 
 drv_rtl8192cd_init_iface_config() {
-	config_add_string ifname
-	config_add_boolean hidden isolate
+	config_add_string ifname bssid 'macaddr:macaddr'
+	config_add_boolean hidden isolate nat25_disable macclone
 	config_add_int maxassoc
 }
 
@@ -610,6 +616,29 @@ rtl_emit_country() {
 	esac
 }
 
+rtl_is_safe_value() {
+	case "$1" in
+		*'"'*|*'
+'*) return 1 ;;
+	esac
+	[ "$(printf '%s' "$1" | tr -d '\\r')" = "$1" ] || return 1
+	return 0
+}
+
+rtl_normalize_bssid() {
+	local cleaned
+	cleaned="$(printf '%s' "$1" | tr -d ':' | tr 'A-F' 'a-f')"
+	case "$cleaned" in
+		[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f])
+			echo "$cleaned"
+			return 0
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
 rtl_cipher_bits() {
 	local cipher="$1" def="$2"
 	case "$cipher" in
@@ -624,6 +653,7 @@ rtl_cipher_bits() {
 rtl_validate_psk() {
 	local k="$1"
 	local klen="${#k}"
+	rtl_is_safe_value "$k" || return 1
 	if [ "$klen" -eq 64 ]; then
 		case "$k" in
 			*[!0-9a-fA-F]*) return 1 ;;
@@ -673,7 +703,7 @@ rtl_emit_encryption() {
 			;;
 		psk)
 			rtl_validate_psk "$key" || return 1
-			cbits="$(rtl_cipher_bits "$cspec" 2)"
+			cbits="$(rtl_cipher_bits "$cspec" 10)"
 			[ "$cbits" = "2" ] && encmode=2 || encmode=4
 			echo "${p}_authtype=0"
 			echo "${p}_encmode=$encmode"
@@ -689,6 +719,38 @@ rtl_emit_encryption() {
 	return 0
 }
 
+rtl_sta_needs_nat25() {
+	local explicit="$1" net_list="$2"
+	local n ntype
+	if [ "$explicit" = "0" ]; then
+		echo 0
+		return 0
+	elif [ "$explicit" = "1" ]; then
+		echo 1
+		return 0
+	fi
+	if command -v uci >/dev/null 2>&1; then
+		for n in $net_list; do
+			ntype="$(uci -q get "network.${n}.type" 2>/dev/null || true)"
+			if [ "$ntype" = "bridge" ]; then
+				echo 0
+				return 0
+			fi
+		done
+	fi
+	echo 1
+}
+
+rtl_down_radio() {
+	local root="$1" d b
+	for d in "/sys/class/net/${root}-vxd" /sys/class/net/"${root}"-va*; do
+		[ -d "$d" ] || continue
+		b="${d##*/}"
+		$IFCONFIG "$b" down >/dev/null 2>&1 || true
+	done
+	[ -d "/sys/class/net/$root" ] && $IFCONFIG "$root" down >/dev/null 2>&1 || true
+}
+
 rtl_merge_fragments() {
 	local tmp="$CFGFILE.tmp.$$"
 	: > "$tmp"
@@ -699,26 +761,81 @@ rtl_merge_fragments() {
 	mv -f "$tmp" "$CFGFILE"
 }
 
+rtl8192cd_count_vifs() {
+	local mode
+	json_select config
+	json_get_vars mode
+	json_select ..
+	case "$mode" in
+		ap) _rtl_ap_total=$(( _rtl_ap_total + 1 )) ;;
+		sta) _rtl_sta_total=$(( _rtl_sta_total + 1 )) ;;
+		*) wireless_setup_vif_failed UNSUPPORTED_MODE ;;
+	esac
+}
+
 rtl8192cd_emit_vif() {
 	local name="$1"
 	local mode ssid encryption key hidden isolate maxassoc ifname
-	local existing enc_lines
+	local bssid vif_mac nat25_disable macclone network_list
+	local existing enc_lines bssid_hex nat25_val
 
 	json_select config
-	json_get_vars mode ssid encryption key hidden isolate maxassoc ifname
+	json_get_vars mode ssid encryption key hidden isolate maxassoc ifname bssid nat25_disable macclone
+	json_get_var vif_mac macaddr
+	json_get_values network_list network
 	json_select ..
 
-	[ -n "$ifname" ] || ifname="$phy_ifname"
+	case "$mode" in
+		ap)
+			if [ -z "$ifname" ]; then
+				if [ "$_rtl_ap_idx" -eq 0 ]; then
+					ifname="$phy_ifname"
+				elif [ "$_rtl_ap_idx" -eq 1 ]; then
+					ifname="${phy_ifname}-va0"
+				else
+					wireless_setup_vif_failed TOO_MANY_VIFS
+					return 1
+				fi
+			fi
+			_rtl_ap_idx=$(( _rtl_ap_idx + 1 ))
+			[ "$ifname" != "$phy_ifname" ] && _rtl_has_vap=1
+			;;
+		sta)
+			if [ "$_rtl_sta_idx" -ge 1 ]; then
+				wireless_setup_vif_failed TOO_MANY_STA
+				return 1
+			fi
+			if [ -z "$ifname" ]; then
+				if [ "$_rtl_ap_total" -gt 0 ]; then
+					ifname="${phy_ifname}-vxd"
+				else
+					ifname="$phy_ifname"
+				fi
+			fi
+			_rtl_sta_idx=$(( _rtl_sta_idx + 1 ))
+			;;
+		*)
+			wireless_setup_vif_failed UNSUPPORTED_MODE
+			return 1
+			;;
+	esac
 
-	[ "$mode" = "ap" ] || {
-		wireless_setup_vif_failed UNSUPPORTED_MODE
-		return 1
-	}
+	if [ "$mode" = "ap" ]; then
+		[ -n "$ssid" ] || {
+			wireless_setup_vif_failed EMPTY_SSID
+			return 1
+		}
+	else
+		if [ -z "$ssid" ] && [ -z "$bssid" ]; then
+			wireless_setup_vif_failed EMPTY_SSID
+			return 1
+		fi
+	fi
 
-	[ -n "$ssid" ] || {
-		wireless_setup_vif_failed EMPTY_SSID
+	if [ -n "$ssid" ] && ! rtl_is_safe_value "$ssid"; then
+		wireless_setup_vif_failed BAD_SSID
 		return 1
-	}
+	fi
 
 	[ -d "/sys/class/net/$ifname" ] || {
 		wireless_setup_vif_failed NO_VIF_DEVICE
@@ -737,16 +854,50 @@ rtl8192cd_emit_vif() {
 		return 1
 	}
 
-	{
-		echo "${ifname}_opmode=16"
-		printf '%s="%s"\\n' "${ifname}_ssid" "$ssid"
-		echo "${ifname}_hiddenAP=${hidden:-0}"
-		echo "${ifname}_block_relay=${isolate:-0}"
-		echo "${ifname}_stanum=${maxassoc:-0}"
-		printf "%s\\n" "$enc_lines"
-	} >> "$FRAGFILE"
+	if [ "$mode" = "ap" ]; then
+		{
+			echo "${ifname}_opmode=16"
+			printf '%s="%s"\\n' "${ifname}_ssid" "$ssid"
+			echo "${ifname}_hiddenAP=${hidden:-0}"
+			echo "${ifname}_block_relay=${isolate:-0}"
+			echo "${ifname}_stanum=${maxassoc:-0}"
+			printf "%s\\n" "$enc_lines"
+		} >> "$FRAGFILE"
+	else
+		bssid_hex="000000000000"
+		if [ -n "$bssid" ]; then
+			bssid_hex="$(rtl_normalize_bssid "$bssid")" || {
+				wireless_setup_vif_failed BAD_BSSID
+				return 1
+			}
+		fi
+		nat25_val="$(rtl_sta_needs_nat25 "$nat25_disable" "$network_list")"
+		{
+			echo "${ifname}_opmode=8"
+			if [ -n "$ssid" ]; then
+				printf '%s="%s"\\n' "${ifname}_ssid" "$ssid"
+			else
+				echo "${ifname}_ssid="
+			fi
+			echo "${ifname}_bssid2join=$bssid_hex"
+			echo "${ifname}_nat25_disable=$nat25_val"
+			echo "${ifname}_macclone_enable=${macclone:-0}"
+			if [ "$ifname" != "$phy_ifname" ]; then
+				echo "${ifname}_band=$band"
+				rtl_emit_country "$ifname" "$cc" "$regdom"
+				echo "${ifname}_use40M=$(rtl_htmode_to_use40m "$htmode")"
+				echo "${ifname}_2ndchoffset=$(rtl_htmode_to_offset "$htmode" "$phy_band" "$channel")"
+				echo "${ifname}_ampdu=1"
+				echo "${ifname}_shortGI20M=1"
+				echo "${ifname}_shortGI40M=1"
+				[ "$phy_band" = "2" ] && echo "${ifname}_shortGI80M=1"
+			fi
+			printf "%s\\n" "$enc_lines"
+		} >> "$FRAGFILE"
+	fi
 
 	_rtl_vifs="$_rtl_vifs $name:$ifname"
+	[ -n "$vif_mac" ] && _rtl_vif_macs="$_rtl_vif_macs $ifname=$vif_mac"
 	return 0
 }
 
@@ -764,11 +915,23 @@ rtl_find_phy() {
 	echo "$want"
 }
 
+rtl_lookup_vif_mac() {
+	local target="$1" entry
+	for entry in $_rtl_vif_macs; do
+		if [ "${entry%%=*}" = "$target" ]; then
+			echo "${entry#*=}"
+			return 0
+		fi
+	done
+	return 1
+}
+
 drv_rtl8192cd_setup() {
 	local devname="$1"
-	local phy_ifname _rtl_vifs="" FRAGFILE
+	local phy_ifname _rtl_vifs="" _rtl_vif_macs="" FRAGFILE
+	local _rtl_ap_total=0 _rtl_sta_total=0 _rtl_ap_idx=0 _rtl_sta_idx=0 _rtl_has_vap=0
 	local channel htmode country hwmode band phy_band phy macaddr
-	local beacon_int dtim_period noscan cc regdom v
+	local beacon_int dtim_period noscan cc regdom v ifn vmac root_mac
 
 	json_select config
 	json_get_vars channel htmode country hwmode band phy_band phy macaddr beacon_int dtim_period noscan
@@ -788,8 +951,11 @@ drv_rtl8192cd_setup() {
 	if [ -z "$phy_band" ]; then
 		case "$hwmode" in
 			11a|a) phy_band=2 ;;
+			11g|11b|g|b) phy_band=1 ;;
 			*)
 				if [ "${band:-0}" -ge 64 ] 2>/dev/null || [ "$band" = "4" ] || [ "$band" = "12" ]; then
+					phy_band=2
+				elif [ "$phy_ifname" = "wlan0" ]; then
 					phy_band=2
 				else
 					phy_band=1
@@ -807,7 +973,9 @@ drv_rtl8192cd_setup() {
 	mkdir -p "$CFGDIR"
 	lock "$LOCKFILE"
 	[ -L /etc/Wireless ] || [ -e /etc/Wireless ] || ln -s "$CFGDIR" /etc/Wireless
-	$IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
+	rtl_down_radio "$phy_ifname"
+
+	for_each_interface "" rtl8192cd_count_vifs
 
 	{
 		echo "${phy_ifname}_band=$band"
@@ -828,7 +996,7 @@ drv_rtl8192cd_setup() {
 		fi
 	} > "$FRAGFILE"
 
-	for_each_interface "ap" rtl8192cd_emit_vif
+	for_each_interface "ap sta" rtl8192cd_emit_vif
 	if [ -z "$_rtl_vifs" ]; then
 		rm -f "$FRAGFILE"
 		rtl_merge_fragments
@@ -837,18 +1005,47 @@ drv_rtl8192cd_setup() {
 		wireless_setup_failed NO_VALID_VIF
 		return 1
 	fi
+	echo "${phy_ifname}_vap_enable=$_rtl_has_vap" >> "$FRAGFILE"
 	rtl_merge_fragments
 
-	if [ -n "$macaddr" ] && ! $IFCONFIG "$phy_ifname" hw ether "$macaddr"; then
+	root_mac="$macaddr"
+	if vmac="$(rtl_lookup_vif_mac "$phy_ifname")"; then
+		root_mac="$vmac"
+	fi
+	if [ -n "$root_mac" ] && ! $IFCONFIG "$phy_ifname" hw ether "$root_mac"; then
 		lock -u "$LOCKFILE"
+		wireless_set_retry 0
 		wireless_setup_failed BAD_MACADDR
 		return 1
 	fi
 	if ! $IFCONFIG "$phy_ifname" up; then
+		rtl_down_radio "$phy_ifname"
 		lock -u "$LOCKFILE"
+		wireless_set_retry 0
 		wireless_setup_failed IFUP_FAILED
 		return 1
 	fi
+
+	for v in $_rtl_vifs; do
+		ifn="${v##*:}"
+		[ "$ifn" = "$phy_ifname" ] && continue
+		if vmac="$(rtl_lookup_vif_mac "$ifn")"; then
+			if ! $IFCONFIG "$ifn" hw ether "$vmac"; then
+				rtl_down_radio "$phy_ifname"
+				lock -u "$LOCKFILE"
+				wireless_set_retry 0
+				wireless_setup_failed BAD_MACADDR
+				return 1
+			fi
+		fi
+		if ! $IFCONFIG "$ifn" up; then
+			rtl_down_radio "$phy_ifname"
+			lock -u "$LOCKFILE"
+			wireless_set_retry 0
+			wireless_setup_failed IFUP_FAILED
+			return 1
+		fi
+	done
 	lock -u "$LOCKFILE"
 
 	for v in $_rtl_vifs; do
@@ -869,7 +1066,7 @@ drv_rtl8192cd_teardown() {
 	phy_ifname="$(rtl_find_phy "$phy" "$devname")"
 	mkdir -p "$CFGDIR"
 	lock "$LOCKFILE"
-	[ -d "/sys/class/net/$phy_ifname" ] && $IFCONFIG "$phy_ifname" down >/dev/null 2>&1 || true
+	rtl_down_radio "$phy_ifname"
 	rm -f "$CFGDIR/radio_${phy_ifname}.dat"
 	rtl_merge_fragments
 	lock -u "$LOCKFILE"
@@ -993,7 +1190,7 @@ if [ "$ACTION" = "released" ]; then
 fi
 exit 0
 """
-BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.6.5-m3-final-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.button/reset':RC_BUTTON_RESET,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
+BASE_FILES={'etc/rsd0614-diagnostic-mode':'v5.7.0-m3-full-router-repeater-ramboot\n','etc/sysctl.d/31-rsd0614-lowmem.conf':'vm.min_free_kbytes=2048\n','etc/init.d/done':"#!/bin/sh /etc/rc.common\n# RSD0614 RAM-only bring-up: never discover, mount, format, or switch rootfs_data.\nSTART=95\nboot() {\n\t[ -f /etc/rc.local ] && sh /etc/rc.local\n\t. /etc/diag.sh\n\tset_state done\n}\n",'etc/init.d/rsd0614-net':INIT_RSD0614_NET,'etc/board.d/01_leds':'#!/bin/sh\n# No unverified LED GPIO ownership.\nexit 0\n','etc/board.d/02_network':BOARD_02_NETWORK,'etc/uci-defaults/99-rsd0614-network':UCI_99_NETWORK,'etc/rc.button/reset':RC_BUTTON_RESET,'etc/rc.local':'#!/bin/sh\n# No donor ASIC startup.\nexit 0\n','lib/netifd/wireless/rtl8192cd.sh':WIFI_NETIFD_SCRIPT,'lib/preinit/01_preinit_do_rsd0614_board_detection':'#!/bin/sh\nrsd0614_board_detect() {\n\tmkdir -p /tmp/sysinfo /tmp/Wireless\n\tprintf "%s\\n" "rockspace,rsd0614" > /tmp/sysinfo/board_name\n\tprintf "%s\\n" "Rock Space RSD0614 V1.0" > /tmp/sysinfo/model\n}\nboot_hook_add preinit_main rsd0614_board_detect\n','usr/sbin/rsd0614-survey':SURVEY_SCRIPT}
 def patch_image_makefile(text):
     if 'define Device/RSD0614\n' not in text:raise ValueError('RSD0614 device profile must already be installed')
     rows=re.findall(r'^DEVICE_VARS\s*\+=\s*([^\n]*)$',text,re.M)

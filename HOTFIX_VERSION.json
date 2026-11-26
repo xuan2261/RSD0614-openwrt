@@ -1,9 +1,9 @@
 {
-  "version": "5.6.5-m3-final-ramboot",
-  "base": "5.6.4-m3-router-hardened-ramboot",
-  "change": "Final M3 RAM-boot polish following v5.6.4 physical hardware verification (zero panic, stale VLAN 7 closed, FLOWOFFLOAD active, block_relay=0 + PC-to-5G ping 7ms, WEXT frequency/bitrate/txpower/operstate UP, LuCI login, 27.4 MiB free RAM, 0 UART n=512 noise): (1) enable TX A-MPDU Block-Ack (ampdu=1) and Short GI (shortGI20M=1, shortGI40M=1, shortGI80M=1 on 5 GHz) in rtl8192cd.sh — fixing both wlan0 (previously AMSDU-only LGI) and wlan1 (previously AGGRE_MTHD_NONE LGI); (2) fix regulatory country handling (rtl_country_to_regdomain aligned to 8192cd_11h.c countryIEArray + rtl_emit_country emitting countrystr and country2reg=1/0) so non-US countries (VN/CN/TW/JP/EU/00) are never silently overwritten back to US by map_country_to_reg(); (3) fix rtl_giwencode() WPA2 branch (erq->length = 16; memset(key, 0, 16); IW_ENCODE_NOKEY) so iwconfig displays masked encryption instead of off; (4) fix rsd0614-survey BusyBox tr class bug (\\040-\\176), add non-64K cr6c-end + 4KiB read-only mtd2ro scanner for M4 geometry discovery, show uhttpd ps args, radio0 factory RF dmesg, iwpriv ampdu/shortGI/country MIBs, br-lan multicast_to_unicast, and gpio-button-hotplug status; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
-  "volume": "rsd0614-openwrt-v565-work",
-  "volume_label": "rsd0614.work=v5.6.5",
+  "version": "5.7.0-m3-full-router-repeater-ramboot",
+  "base": "5.6.5-m3-final-ramboot",
+  "change": "Full router + Wi-Fi Repeater + Multi-SSID RAM-boot release consolidating all 4-agent audit findings into one build: (1) rtl8192cd driver: enable CLIENT_MODE + UNIVERSAL_REPEATER (wlanX-vxd) + VXD_DIFF_MAC + MBSSID (wlanX-va0) with distinct MACs and skip site_survey on AP VAPs, fix 8814B/8197G ADDRCAM/StopMBSSID88XX_V2/StopHW88XX/STA BCNQ/NAPI-close races, harden RTK_BR_EXT NAT2.5 (br_port_exists, dynamic br_mac, skb_cloned expand, tailroom guard), and fix WEXT scan/stats/security IE/bounds (async rtl_siwscan, -EAGAIN + bss_backup + dBm + SIOCGIWENCODE in rtl_giwscan, WLAN_HDR_A3_LEN in rtw_get_sec_ie, WholeFrame clamp, rtl8192cd_get_wireless_stats, STA rtl_giwap/rtl_giwrate, rewrite_line clamp); (2) libiwinfo WEXT compat patch (patches/iwinfo-wext-rsd0614.patch): resolve radioN->wlanN, add .htmode/.survey/.lookup_phy stubs preventing rpcd SIGSEGV, parse /proc/<ifname>/sta_info for LuCI Associated Stations & /proc/<ifname>/mib_auth for Encryption, parse SIOCGIWNAME for hwmodelist/htmodelist, respect IW_QUAL_*_INVALID, and defer country to UCI; (3) netifd rtl8192cd.sh: full AP, STA (routed WISP / relayd / auto-NAT2.5 bridged), Same-Band Universal Repeater (wlanX + wlanX-vxd), and Multi-SSID Guest Wi-Fi (wlanX-va0) with bssid2join, per-VIF macaddr, control-char guard, and ordered down/up rollback; (4) LuCI wireless.js: fix upstream 19.07 Join Network .filter() truthy-array bug forcing encryption=sae on WPA2, re-enable Client mode, bind bssid/maxassoc/nat25_disable, and keep auto channel; (5) add relayd + luci-proto-relay + iwinfo CLI + zero-risk kernel diet (~260-350 KiB reclaimed) + rtl819x-eth.c eth_skb_pad() runt TX OOB DMA fix; all 6 MTDs stay read-only, pcie1/LEDs disabled, persistent flash NO-GO",
+  "volume": "rsd0614-openwrt-v570-work",
+  "volume_label": "rsd0614.work=v5.7.0",
   "preserve_old_volumes": [
     "rsd0614-openwrt-v52-work",
     "rsd0614-openwrt-v53-work",
@@ -24,7 +24,8 @@
     "rsd0614-openwrt-v561-work",
     "rsd0614-openwrt-v562-work",
     "rsd0614-openwrt-v563-work",
-    "rsd0614-openwrt-v564-work"
+    "rsd0614-openwrt-v564-work",
+    "rsd0614-openwrt-v565-work"
   ],
   "persistent_flash": "NO-GO"
 }

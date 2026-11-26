@@ -12,10 +12,10 @@
   "stock_dump_sha256": "7dbe0d7cd63bc31b107c597cadd52e806a1110552c22502b3983651644543500",
   "mode": "initramfs-only",
   "persistent_flash": "NO-GO",
-  "bundle_version": "5.6.5",
+  "bundle_version": "5.7.0",
   "debian_snapshot": "20260901T000000Z",
   "builder_base": "debian:bullseye",
   "builder_base_digest_pinned": false,
   "ram_boot_authorized": false,
-  "intent": "M3 final RAM-only dual-band Wi-Fi AP + LuCI 19.07 + full-MTU wired Gigabit candidate (v5.6.5-m3-final-ramboot): builds on hardware-verified v5.6.4 (zero panic, clean VLAN 1/2-only switch0 via rtl8367s_clear_stale_vlans, ucidef_add_switch topology, FLOWOFFLOAD software flow_offloading, block_relay=0 + PC-to-5G ping 7ms via multicast_to_unicast=0, WEXT freq/rate/txpow/operstate via rtl_giwtxpow, uhttpd-mod-lua LuCI login, 27.4 MiB free RAM, 0 UART n=512 noise) and fixes the remaining audited Wi-Fi performance/regulatory/WEXT/survey bugs — enables TX A-MPDU (ampdu=1) and Short GI (shortGI20M=1, shortGI40M=1, shortGI80M=1 on 5 GHz) in rtl8192cd.sh, aligns rtl_country_to_regdomain + emits countrystr/country2reg so map_country_to_reg never overwrites non-US countries back to US, fixes rtl_giwencode() dummy length=16 with IW_ENCODE_NOKEY so iwconfig shows encrypted WPA2 instead of off, and fixes rsd0614-survey (BusyBox tr \\040-\\176, non-64K cr6c-end/4KiB read-only mtd2ro scanner, uhttpd ps args, radio0 factory RF dmesg, br-lan multicast_to_unicast, gpio-button-hotplug); all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, persistent flash stays NO-GO"
+  "intent": "M3 full router + Wi-Fi Repeater + Multi-SSID RAM-only candidate (v5.7.0-m3-full-router-repeater-ramboot): consolidates all 4-agent audit fixes on top of v5.6.5 while preserving all 5 pinned commits — enables rtl8192cd CLIENT_MODE + UNIVERSAL_REPEATER (wlanX-vxd) + VXD_DIFF_MAC + MBSSID (wlanX-va0) with 8814B/8197G ADDRCAM/StopHW88XX/NAPI-close/NAT2.5/WEXT scan & stats fixes, adds libiwinfo WEXT compat patch (radioN->wlanN, rpcd-safe .htmode/.survey/.lookup_phy, /proc/<ifname>/sta_info & mib_auth parsing), upgrades netifd rtl8192cd.sh (AP, routed WISP STA, relayd, auto-NAT2.5 bridged STA, Same-Band Universal Repeater, Guest Multi-SSID), fixes LuCI wireless.js Join Network is_sae bug and enables Client/auto-channel UX, adds relayd + luci-proto-relay + iwinfo CLI + zero-risk kernel diet, and fixes rtl819x-eth.c runt TX eth_skb_pad(); all 6 MTD partitions stay strictly read-only, pcie1 and unverified LEDs stay disabled, persistent flash stays NO-GO"
 }

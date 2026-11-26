@@ -2395,7 +2395,10 @@ int main(void) {
  def test_v570_metadata_and_provenance_wiring(self):
   lock=json.loads((ROOT/'SOURCE_LOCK.json').read_text());self.assertEqual(lock['bundle_version'],'5.7.0');self.assertEqual(lock['persistent_flash'],'NO-GO');self.assertFalse(lock['ram_boot_authorized']);self.assertIn('UNIVERSAL_REPEATER',lock['intent']);self.assertIn('relayd',lock['intent']);self.assertIn('libiwinfo',lock['intent']);self.assertIn('eth_skb_pad',lock['intent']);self.assertIn('read-only',lock['intent'])
   self.assertEqual(hs.BASE_FILES['etc/rsd0614-diagnostic-mode'],'v5.7.0-m3-full-router-repeater-ramboot\n')
-  self.assertIn("b'v5.7.0-m3-full-router-repeater-ramboot\\n'",(ROOT/'deep_audit.py').read_text())
+  da_src=(ROOT/'deep_audit.py').read_text()
+  self.assertIn("b'v5.7.0-m3-full-router-repeater-ramboot\\n'",da_src)
+  self.assertIn("luci_wjs_compact=re.sub(rb'\\s+',b'',luci_wjs)",da_src)
+  self.assertIn("b\".filter(function(a){returna=='sae'}).length>0\" in luci_wjs_compact",da_src)
   seed=(ROOT/'seed-rsd0614-initramfs.config').read_text()
   for tok in ('CONFIG_PACKAGE_uhttpd-mod-lua=y','CONFIG_PACKAGE_relayd=y','CONFIG_PACKAGE_luci-proto-relay=y','CONFIG_PACKAGE_iwinfo=y','# CONFIG_KERNEL_CGROUPS is not set','# CONFIG_KERNEL_SWAP is not set'):
    self.assertIn(tok,seed)

@@ -242,6 +242,7 @@ def audit(image):
     wifimod=byname.get('lib/modules/4.14.187/rtl8192cd.ko');wifiauto=byname.get('etc/modules.d/60-rtl8192cd-rsd0614',{}).get('data',b'')
     wifish=byname.get('lib/netifd/wireless/rtl8192cd.sh')
     luci_wjs=byname.get('www/luci-static/resources/view/network/wireless.js',{}).get('data',b'')
+    luci_wjs_compact=re.sub(rb'\s+',b'',luci_wjs)
     libiwinfo=byname.get('usr/lib/libiwinfo.so',{}).get('data',b'')
     dropbear_init=byname.get('etc/init.d/dropbear',{}).get('data',b'')
     has_iwpriv=('usr/sbin/iwpriv' in byname) or ('sbin/iwpriv' in byname)
@@ -267,10 +268,11 @@ def audit(image):
           b'HT40+|VHT40+) echo 2' in wifish['data'] and
           b'rtl_derive_band' in wifish['data'] and b'rtl_validate_psk' in wifish['data'] and
           b'encmode=6' not in wifish['data'] and b'led_type' not in wifish['data'] and
-          b'rtl8192cd' in luci_wjs and b'VHT80' in luci_wjs and
-          b"rtl_bssid.depends('mode', 'sta')" in luci_wjs and
-          b"unshift('auto', 'auto', true)" in luci_wjs and
-          b".filter(function(a) { return a == 'sae' }).length > 0" in luci_wjs and
+          b'rtl8192cd' in luci_wjs_compact and b'VHT80' in luci_wjs_compact and
+          b'nat25_disable' in luci_wjs_compact and
+          b"rtl_bssid.depends('mode','sta')" in luci_wjs_compact and
+          b"unshift('auto','auto',true)" in luci_wjs_compact and
+          b".filter(function(a){returna=='sae'}).length>0" in luci_wjs_compact and
           b'/proc/%s/sta_info' in libiwinfo and b'/proc/%s/mib_auth' in libiwinfo and
           'usr/sbin/relayd' in byname and 'usr/bin/iwinfo' in byname and
           'www/luci-static/resources/protocol/relay.js' in byname and
